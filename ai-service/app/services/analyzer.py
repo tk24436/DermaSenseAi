@@ -1,114 +1,224 @@
-from abc import ABC, abstractmethod
-import os
-import requests
-from app.schemas import SkinAnalysisResponse, DetectedIssue, PoreDetected
+"""
+Analyzer Strategy Pattern
+--------------------------
+Supports Face++ API and ONNX (Glowlytics) backends.
+Switch via ACTIVE_ANALYZER env var: 'facepp' or 'onnx'.
+"""
 
+import logging
+import os
+from abc import ABC, abstractmethod
+
+import requests
+
+from app.schemas import DetectedIssue, PoreDetected, SkinAnalysisResponse
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Base interface
+# ---------------------------------------------------------------------------
 class BaseAnalyzer(ABC):
     @abstractmethod
     def analyze(self, image_bytes: bytes) -> SkinAnalysisResponse:
         pass
 
+
+# ---------------------------------------------------------------------------
+# Face++ implementation
+# ---------------------------------------------------------------------------
 class FacePPAnalyzer(BaseAnalyzer):
+    """Calls the Face++ Skin Analyze API and maps its response to the
+    shared SkinAnalysis contract."""
+
     def analyze(self, image_bytes: bytes) -> SkinAnalysisResponse:
         api_key = os.getenv("FACEPP_API_KEY")
         api_secret = os.getenv("FACEPP_API_SECRET")
-        base_url = os.getenv("FACEPP_BASE_URL", "https://api-us.faceplusplus.com/facepp/v1/skinanalyze")
-        
+        base_url = os.getenv(
+            "FACEPP_BASE_URL",
+            "https://api-us.faceplusplus.com/facepp/v1/skinanalyze",
+        )
+
         if not api_key or not api_secret:
-            raise ValueError("Face++ API credentials not set.")
-            
-        data = {
-            "api_key": api_key,
-            "api_secret": api_secret,
-        }
+            raise ValueError(
+                "Face++ API credentials not configured. "
+                "Set FACEPP_API_KEY and FACEPP_API_SECRET in your .env file."
+            )
+
+        data = {"api_key": api_key, "api_secret": api_secret}
         files = {"image_file": image_bytes}
-        
-        response = requests.post(base_url, data=data, files=files, timeout=30)
-        
+
+        try:
+            response = requests.post(base_url, data=data, files=files, timeout=30)
+        except requests.RequestException as e:
+            logger.error("Face++ API request failed: %s", e)
+            raise RuntimeError("Skin analysis service temporarily unavailable") from e
+
         if response.status_code != 200:
-            raise RuntimeError(f"Face++ API returned error: {response.text}")
-            
+            # Never leak raw API response (may contain keys in URL params)
+            logger.error(
+                "Face++ returned %s: %s", response.status_code, response.text
+            )
+            raise RuntimeError(
+                f"Skin analysis failed (upstream status {response.status_code})"
+            )
+
         result = response.json()
-        
-        # Transform logic
-        detected_issues = []
-        subscores = {}
-        skin_score = 100
-        
-        # Helper to process issues
-        def add_issue(issue_name, data_key, score_key, penalty_weight):
-            nonlocal skin_score
+        return self._transform(result)
+
+    # ----- transform raw Face++ JSON -> shared contract -----
+
+    @staticmethod
+    def _severity(confidence: float) -> str:
+        if confidence > 0.8:
+            return "high"
+        if confidence > 0.5:
+            return "medium"
+        if confidence > 0.25:
+            return "low"
+        return "none"
+
+    def _transform(self, result: dict) -> SkinAnalysisResponse:
+        detected_issues: list[DetectedIssue] = []
+        subscores: dict[str, int] = {}
+        skin_score: float = 100.0
+
+        # Mapping: (display_name, face++ key, subscore key, penalty weight)
+        issue_map = [
+            ("Acne", "acne", "acne", 1.0),
+            ("Pigmentation", "stain", "pigmentation", 0.8),
+            ("Dark Circles", "dark_circle", "darkCircles", 0.6),
+            ("Wrinkles", "wrinkle", "wrinkles", 0.7),
+            ("Blackheads", "blackhead", "texture", 0.5),
+        ]
+
+        for display_name, data_key, score_key, weight in issue_map:
             if data_key in result:
-                item_data = result[data_key]
-                # Face++ format often has value/confidence or similar, adjusting based on typical shape
-                # This is a robust fallback if it's just a number
-                confidence = float(item_data.get('confidence', 0.8) if isinstance(item_data, dict) else 0.8)
-                present = confidence > 0.5
-                severity = "high" if confidence > 0.8 else ("medium" if confidence > 0.5 else "none")
-                
-                detected_issues.append(DetectedIssue(
-                    issue=issue_name, present=present, confidence=confidence, severity=severity
-                ))
-                subscore = int(100 - (confidence * 100) * penalty_weight) if present else 100
+                item = result[data_key]
+                confidence = float(
+                    item.get("confidence", 0.5)
+                    if isinstance(item, dict)
+                    else 0.5
+                )
+                confidence = max(0.0, min(1.0, confidence))  # clamp
+                present = confidence > 0.4
+                severity = self._severity(confidence)
+
+                detected_issues.append(
+                    DetectedIssue(
+                        issue=display_name,
+                        present=present,
+                        confidence=round(confidence, 2),
+                        severity=severity,
+                    )
+                )
+                subscore = int(100 - (confidence * 100 * weight)) if present else 100
                 subscores[score_key] = max(0, subscore)
                 if present:
-                    skin_score -= (confidence * 100) * penalty_weight * 0.2 # 20% weight overall per issue roughly
-        
-        add_issue("Acne", "acne", "acne", 1.0)
-        add_issue("Stain/Pigmentation", "stain", "pigmentation", 0.8)
-        add_issue("Dark Circles", "dark_circle", "darkCircles", 0.6)
-        add_issue("Wrinkles", "wrinkle", "wrinkles", 0.7)
-        
-        # Pores mock or map if facepp supports it
-        pores = [
-            PoreDetected(region="Left Cheek", present=False, confidence=0.0, severity="none"),
-            PoreDetected(region="Right Cheek", present=False, confidence=0.0, severity="none")
-        ]
-        
-        skin_type = result.get('skin_type', {}).get('skin_type', 0)
-        skin_type_str = "combination"
-        if skin_type == 1: skin_type_str = "dry"
-        elif skin_type == 2: skin_type_str = "oily"
-        elif skin_type == 3: skin_type_str = "neutral"
-        
-        # Ensure subscores has defaults
-        for k in ["acne", "pigmentation", "darkCircles", "wrinkles", "texture", "oilBalance"]:
-            if k not in subscores:
-                subscores[k] = 100
-                
-        # Final formatting
+                    skin_score -= confidence * 100 * weight * 0.15
+            else:
+                # Issue not returned by API — default to clean
+                detected_issues.append(
+                    DetectedIssue(
+                        issue=display_name,
+                        present=False,
+                        confidence=0.0,
+                        severity="none",
+                    )
+                )
+
+        # Pore regions (Face++ provides pore data per-region in some plans)
+        pore_regions = ["Left Cheek", "Right Cheek", "Forehead", "Jaw"]
+        pores: list[PoreDetected] = []
+        pore_data = result.get("pore", {})
+        for region in pore_regions:
+            region_key = region.lower().replace(" ", "_")
+            if isinstance(pore_data, dict) and region_key in pore_data:
+                conf = max(0.0, min(1.0, float(pore_data[region_key].get("confidence", 0.0))))
+                pores.append(
+                    PoreDetected(
+                        region=region,
+                        present=conf > 0.4,
+                        confidence=round(conf, 2),
+                        severity=self._severity(conf),
+                    )
+                )
+            else:
+                pores.append(
+                    PoreDetected(
+                        region=region, present=False, confidence=0.0, severity="none"
+                    )
+                )
+
+        # Skin type
+        skin_type_raw = result.get("skin_type", {})
+        skin_type_val = (
+            skin_type_raw.get("skin_type", 0) if isinstance(skin_type_raw, dict) else 0
+        )
+        skin_type_map = {0: "combination", 1: "dry", 2: "oily", 3: "neutral"}
+        skin_type_str = skin_type_map.get(skin_type_val, "combination")
+
+        # Ensure all six subscores exist
+        for key in ["acne", "pigmentation", "darkCircles", "wrinkles", "texture", "oilBalance"]:
+            subscores.setdefault(key, 100)
+
         return SkinAnalysisResponse(
             detectedIssues=detected_issues,
             poresDetected=pores,
             skinType=skin_type_str,
             skinScore=max(0, min(100, int(skin_score))),
-            subscores=subscores
+            subscores=subscores,
         )
 
+
+# ---------------------------------------------------------------------------
+# ONNX / Glowlytics implementation (placeholder — returns mock data)
+# ---------------------------------------------------------------------------
 class ONNXAnalyzer(BaseAnalyzer):
+    """Placeholder for local ONNX inference using the Glowlytics skin models.
+    Returns realistic mock data matching the shared contract until the
+    models are integrated."""
+
     def analyze(self, image_bytes: bytes) -> SkinAnalysisResponse:
-        # Placeholder for actual ONNX runtime logic (Glowlytics models)
-        # We will mock the output to match the shape for now
-        
+        logger.info("ONNXAnalyzer invoked (using mock data until models are integrated)")
         return SkinAnalysisResponse(
             detectedIssues=[
                 DetectedIssue(issue="Acne", present=True, confidence=0.87, severity="high"),
-                DetectedIssue(issue="Dark Circles", present=False, confidence=0.12, severity="none")
+                DetectedIssue(issue="Pigmentation", present=False, confidence=0.15, severity="none"),
+                DetectedIssue(issue="Dark Circles", present=False, confidence=0.12, severity="none"),
+                DetectedIssue(issue="Wrinkles", present=False, confidence=0.08, severity="none"),
+                DetectedIssue(issue="Blackheads", present=True, confidence=0.62, severity="medium"),
             ],
             poresDetected=[
-                PoreDetected(region="Left Cheek", present=True, confidence=0.88, severity="high")
+                PoreDetected(region="Left Cheek", present=True, confidence=0.88, severity="high"),
+                PoreDetected(region="Right Cheek", present=False, confidence=0.30, severity="none"),
+                PoreDetected(region="Forehead", present=False, confidence=0.20, severity="none"),
+                PoreDetected(region="Jaw", present=False, confidence=0.10, severity="none"),
             ],
             skinType="oily",
             skinScore=82,
             subscores={
-                "acne": 90, "pigmentation": 80,
-                "darkCircles": 100, "wrinkles": 100,
-                "texture": 82, "oilBalance": 100
-            }
+                "acne": 90,
+                "pigmentation": 80,
+                "darkCircles": 100,
+                "wrinkles": 100,
+                "texture": 82,
+                "oilBalance": 100,
+            },
         )
 
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
 def get_analyzer() -> BaseAnalyzer:
+    """Return the active analyzer based on the ACTIVE_ANALYZER env var."""
     strategy = os.getenv("ACTIVE_ANALYZER", "facepp").lower()
     if strategy == "onnx":
         return ONNXAnalyzer()
-    return FacePPAnalyzer()
+    if strategy == "facepp":
+        return FacePPAnalyzer()
+    raise ValueError(
+        f"Unknown ACTIVE_ANALYZER '{strategy}'. Must be 'facepp' or 'onnx'."
+    )
