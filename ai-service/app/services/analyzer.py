@@ -46,8 +46,16 @@ class FacePPAnalyzer(BaseAnalyzer):
                 "Set FACEPP_API_KEY and FACEPP_API_SECRET in your .env file."
             )
 
+        # Face++ only accepts JPEG/PNG; convert any format (WEBP, etc.) to JPEG
+        import io
+        from PIL import Image
+        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        jpeg_buffer = io.BytesIO()
+        pil_img.save(jpeg_buffer, format="JPEG", quality=95)
+        jpeg_bytes = jpeg_buffer.getvalue()
+
         data = {"api_key": api_key, "api_secret": api_secret}
-        files = {"image_file": image_bytes}
+        files = {"image_file": ("image.jpg", jpeg_bytes, "image/jpeg")}
 
         try:
             response = requests.post(base_url, data=data, files=files, timeout=30)
