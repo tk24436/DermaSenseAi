@@ -67,8 +67,19 @@ class FacePPAnalyzer(BaseAnalyzer):
             logger.error(
                 "Face++ returned %s: %s", response.status_code, response.text
             )
+            # If Face++ cannot find a strict frontal landmark face (INVALID_IMAGE_FACE), fallback to local ONNX analyzer
+            err_data = {}
+            try:
+                err_data = response.json()
+            except Exception:
+                pass
+
+            if "INVALID_IMAGE_FACE" in err_data.get("error_message", ""):
+                logger.warning("Face++ reported INVALID_IMAGE_FACE. Falling back to local ONNX model inference.")
+                return ONNXAnalyzer().analyze(image_bytes)
+
             raise RuntimeError(
-                f"Skin analysis failed (upstream status {response.status_code})"
+                f"Skin analysis failed: {err_data.get('error_message', response.status_code)}"
             )
 
         result = response.json()
