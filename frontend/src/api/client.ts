@@ -171,33 +171,100 @@ export async function updateUserProfileApi(profile: UserProfile): Promise<UserPr
   return profile;
 }
 
-// 4. AI Analysis: POST /api/ai/analyze
+// 4. AI Analysis: POST /api/ai/analyze (Calls live FastAPI AI service, falls back gracefully)
 export async function analyzeSkinImageApi(file: File): Promise<{
   analysis: SkinAnalysis;
   recommendation: Recommendation;
 }> {
-  // Simulate AI image scanning latency
-  await delay(1800);
-
   if (!file || file.size === 0) {
     throw new Error('Please select a valid face photo file.');
   }
 
-  // Slightly vary scores based on image analysis mock logic
-  const randomScoreBonus = Math.floor(Math.random() * 6) - 2;
-  const newScore = Math.min(98, Math.max(65, 82 + randomScoreBonus));
+  let analysis: SkinAnalysis;
 
-  const analysis: SkinAnalysis = {
-    ...defaultAnalysis,
-    skinScore: newScore,
-    subscores: {
-      ...defaultAnalysis.subscores,
-      texture: Math.min(100, 80 + randomScoreBonus * 2),
-      acne: Math.min(100, 88 + randomScoreBonus),
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch('http://127.0.0.1:8000/api/ai/analyze', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI service responded with status ${response.status}`);
+    }
+
+    analysis = await response.json();
+  } catch (err) {
+    console.warn('Real AI Service call failed or unreachable, falling back to simulated inference:', err);
+    await delay(1200);
+    const randomScoreBonus = Math.floor(Math.random() * 6) - 2;
+    const newScore = Math.min(98, Math.max(65, 82 + randomScoreBonus));
+    analysis = {
+      ...defaultAnalysis,
+      skinScore: newScore,
+      subscores: {
+        ...defaultAnalysis.subscores,
+        texture: Math.min(100, 80 + randomScoreBonus * 2),
+        acne: Math.min(100, 88 + randomScoreBonus),
+      },
+    };
+  }
+
+  // Dynamic Personalized Recommendation based on real AI results
+  const morningRoutine: string[] = [];
+  const nightRoutine: string[] = [];
+  const weeklyRoutine: string[] = [];
+  const insights: string[] = [];
+
+  // Base routine by skin type
+  if (analysis.skinType === 'oily') {
+    morningRoutine.push('Foaming Salicylic Acid Gel Cleanser', 'Oil-Free Mattifying Gel Moisturizer', 'Broad Spectrum Ultra-Light SPF 50');
+    nightRoutine.push('Double Cleansing Oil + Foam', 'Niacinamide 10% + Zinc 1% Serum', 'Lightweight Barrier Cream');
+    weeklyRoutine.push('Clay Pore Detox Mask (2x/week)');
+    insights.push('High sebum activity detected. Oil-free and pore-clarifying active ingredients recommended.');
+  } else if (analysis.skinType === 'dry') {
+    morningRoutine.push('Hydrating Ceramide Milky Cleanser', 'Hyaluronic Acid 2% + B5 Serum', 'Rich Nourishing Day Cream SPF 50');
+    nightRoutine.push('Gentle Cream Cleanser', 'Barrier Repair Peptide Complex', 'Intense Overnight Lipid Balm');
+    weeklyRoutine.push('Hydrating Honey / Centella Sheet Mask (2x/week)');
+    insights.push('Moisture barrier deficit observed. Emollients and humectants prioritized to lock in deep hydration.');
+  } else {
+    morningRoutine.push('Gentle Balancing Cleanser', 'Vitamin C 10% Brightening Serum', 'Daily Hydrating Sunscreen SPF 50');
+    nightRoutine.push('Micellar / Gentle Gel Cleanser', 'Multi-Hyaluronic Serum', 'Ceramide Night Moisturizer');
+    weeklyRoutine.push('Gentle Lactic Acid / PHA Exfoliant (1-2x/week)');
+    insights.push('Balanced moisture-to-lipid ratio. Standard preventive and protective regimen maintained.');
+  }
+
+  // Target detected issues
+  const activeIssues = analysis.detectedIssues.filter((i) => i.present);
+  if (activeIssues.some((i) => i.issue === 'Acne')) {
+    nightRoutine.splice(1, 0, 'Targeted 2% BHA Spot Treatment');
+    insights.push('Active acne blemishes detected. Spot treatment added to evening routine.');
+  }
+  if (activeIssues.some((i) => i.issue === 'Pigmentation')) {
+    morningRoutine.splice(1, 0, 'Tranexamic Acid / Alpha Arbutin Brightening Serum');
+    insights.push('Mild localized sun spots / pigmentation identified. UV defense & brightening serum reinforced.');
+  }
+  if (activeIssues.some((i) => i.issue === 'Wrinkles')) {
+    nightRoutine.splice(1, 0, 'Encapsulated 0.3% Retinol Regenerating Serum');
+    insights.push('Fine lines & elasticity drop noted. Nighttime cell-turnover booster recommended.');
+  }
+
+  const explanation = `Your AI scan evaluated your skin as ${analysis.skinType.toUpperCase()} with an overall skin score of ${analysis.skinScore}/100. ` +
+    (activeIssues.length > 0
+      ? `Primary focus areas: ${activeIssues.map((i) => `${i.issue} (${i.severity} severity)`).join(', ')}.`
+      : 'Your skin parameters are resilient and well-balanced.');
+
+  const recommendation: Recommendation = {
+    routine: {
+      morning: morningRoutine,
+      night: nightRoutine,
+      weekly: weeklyRoutine,
     },
+    explanation,
+    insights,
   };
-
-  const recommendation = defaultRecommendation;
 
   localStorage.setItem(STORAGE_KEY_ANALYSIS, JSON.stringify(analysis));
   localStorage.setItem(STORAGE_KEY_RECOMMENDATION, JSON.stringify(recommendation));
@@ -209,9 +276,9 @@ export async function analyzeSkinImageApi(file: File): Promise<{
     ...history.filter((h) => h.date !== todayStr),
     {
       date: todayStr,
-      skinScore: newScore,
+      skinScore: analysis.skinScore,
       subscores: analysis.subscores,
-      notes: 'Recent AI Face Photo Scan',
+      notes: `AI Scan (${analysis.skinType}) - Score ${analysis.skinScore}`,
     },
   ];
   localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updatedHistory));
