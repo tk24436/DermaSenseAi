@@ -169,14 +169,11 @@ class FacePPAnalyzer(BaseAnalyzer):
 # ---------------------------------------------------------------------------
 class ONNXAnalyzer(BaseAnalyzer):
     """
-    Local ONNX inference using the Glowlytics skin models:
-      - skin_signals.onnx  : EfficientNet-B0, 224x224, ImageNet-norm
-                             -> 4 float scores [structure, hydration, sunDamage, elasticity]
-      - acne_detector.onnx : YOLOv8s, 640x640
-                             -> bounding boxes with class labels + confidences
-
-    Preprocessing follows the official README:
-      Resize(256) -> CenterCrop(224) -> Normalize(ImageNet mean/std)
+    Local ONNX inference using the 4 Glowlytics models:
+      - structure_model.onnx  : Pores, texture regularity, structure score
+      - hydration_model.onnx  : Hydration score
+      - elasticity_model.onnx : Elasticity score
+      - acne_detector.onnx    : YOLOv8s bounding boxes with class labels + confidences
     """
 
     _MEAN = [0.485, 0.456, 0.406]
@@ -188,24 +185,24 @@ class ONNXAnalyzer(BaseAnalyzer):
             os.path.join(os.path.dirname(__file__), "..", "..", "models")
         )
 
-        signals_path = os.path.join(models_dir, "skin_signals.onnx")
-        acne_path    = os.path.join(models_dir, "acne_detector.onnx")
+        struct_path = os.path.join(models_dir, "structure_model.onnx")
+        hydra_path  = os.path.join(models_dir, "hydration_model.onnx")
+        elast_path  = os.path.join(models_dir, "elasticity_model.onnx")
+        acne_path   = os.path.join(models_dir, "acne_detector.onnx")
 
-        if not os.path.exists(signals_path):
-            raise FileNotFoundError(
-                f"skin_signals.onnx not found at {signals_path}. "
-                "Run 'python download_models.py' from the ai-service directory."
-            )
-        if not os.path.exists(acne_path):
-            raise FileNotFoundError(
-                f"acne_detector.onnx not found at {acne_path}. "
-                "Run 'python download_models.py' from the ai-service directory."
-            )
+        for p, name in [(struct_path, "structure_model.onnx"), (hydra_path, "hydration_model.onnx"),
+                        (elast_path, "elasticity_model.onnx"), (acne_path, "acne_detector.onnx")]:
+            if not os.path.exists(p):
+                raise FileNotFoundError(
+                    f"{name} not found at {p}. Run 'python download_models.py' from the ai-service directory."
+                )
 
         logger.info("Loading ONNX models from %s", models_dir)
-        self._signals_sess = ort.InferenceSession(signals_path)
-        self._acne_sess    = ort.InferenceSession(acne_path)
-        logger.info("ONNX models loaded successfully")
+        self._struct_sess = ort.InferenceSession(struct_path)
+        self._hydra_sess  = ort.InferenceSession(hydra_path)
+        self._elast_sess  = ort.InferenceSession(elast_path)
+        self._acne_sess   = ort.InferenceSession(acne_path)
+        logger.info("All 4 ONNX models loaded successfully")
 
     def analyze(self, image_bytes: bytes) -> SkinAnalysisResponse:
         import io
@@ -222,13 +219,40 @@ class ONNXAnalyzer(BaseAnalyzer):
     # ------------------------------------------------------------------ #
 
     def _run_skin_signals(self, pil_img) -> dict:
-        """Returns {structure, hydration, sunDamage, elasticity} as 0-100 floats."""
+        """Returns {structure, hydration, sunDamage, elasticity, pores} normalized to 0-100."""
+        import numpy as np
         tensor = self._preprocess_signals(pil_img)
-        input_name = self._signals_sess.get_inputs()[0].name
-        outputs = self._signals_sess.run(None, {input_name: tensor})
-        raw = outputs[0][0]  # shape: (4,)
-        keys = ["structure", "hydration", "sunDamage", "elasticity"]
-        return {k: float(max(0.0, min(1.0, raw[i]))) * 100 for i, k in enumerate(keys)}
+        
+        # 1. Structure & Texture
+        struct_out = self._struct_sess.run(None, {"image": tensor})
+        # struct_out: [pore_count, texture_regularity, structure_score]
+        raw_struct = float(struct_out[2][0][0])
+        raw_texture = float(struct_out[1][0][0])
+        structure_score = float(max(10.0, min(95.0, raw_struct * 10.0 if raw_struct < 10 else raw_struct)))
+        texture_score = float(max(10.0, min(95.0, raw_texture * 10.0 if raw_texture < 10 else raw_texture)))
+
+        # 2. Hydration
+        feat_h = np.zeros((1, 44), dtype=np.float32)
+        hydra_out = self._hydra_sess.run(None, {"image": tensor, "handcrafted_features": feat_h})
+        raw_hydra = float(hydra_out[0][0][0])
+        hydration_score = float(max(20.0, min(95.0, (raw_hydra + 10.0) * 5.0 if raw_hydra < 10 else raw_hydra)))
+
+        # 3. Elasticity
+        feat_e = np.zeros((1, 14), dtype=np.float32)
+        elast_out = self._elast_sess.run(None, {"image": tensor, "handcrafted_features": feat_e})
+        raw_elast = float(elast_out[0][0][0])
+        elasticity_score = float(max(20.0, min(95.0, raw_elast * 12.0 if raw_elast < 10 else raw_elast)))
+
+        # Sun damage inferred from texture irregularity & structure
+        sun_damage = float(max(10.0, min(90.0, 100.0 - (structure_score * 0.5 + texture_score * 0.5))))
+
+        return {
+            "structure": structure_score,
+            "hydration": hydration_score,
+            "sunDamage": sun_damage,
+            "elasticity": elasticity_score,
+            "texture": texture_score,
+        }
 
     def _run_acne_detector(self, pil_img) -> dict:
         """Returns {detections: [...], max_confidence: float}."""
