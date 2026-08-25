@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 MAX_IMAGE_SIZE = 10 * 1024 * 1024
 
 
+from botocore.config import Config
+
 class StorageService:
     def __init__(self):
         self.s3_client = boto3.client(
@@ -20,6 +22,7 @@ class StorageService:
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", "password123"),
             region_name=os.getenv("AWS_REGION", "us-east-1"),
             endpoint_url=os.getenv("S3_ENDPOINT_URL", "http://localhost:9000"),
+            config=Config(connect_timeout=2, read_timeout=2, retries={'max_attempts': 0})
         )
         self.bucket_name = os.getenv("S3_BUCKET_NAME", "dermasense-images")
 
