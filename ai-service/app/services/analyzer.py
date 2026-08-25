@@ -312,29 +312,24 @@ class ONNXAnalyzer(BaseAnalyzer):
     @staticmethod
     def _parse_yolo_output(raw, orig_w: int, orig_h: int, conf_thresh: float = 0.25) -> list:
         """
-        raw shape: [1, 4+num_classes, num_anchors].
+        raw shape: [1, 5, 8400] where channels are [cx, cy, w, h, confidence].
         Returns list of {class, confidence, bbox} dicts above conf_thresh.
         """
         import numpy as np
-        predictions = raw[0].T                     # [anchors, 4+nc]
-        boxes       = predictions[:, :4]
-        class_probs = predictions[:, 4:]
-        class_ids   = class_probs.argmax(axis=1)
-        confidences = class_probs[range(len(class_probs)), class_ids]
+        predictions = raw[0].T  # [8400, 5]
+        boxes = predictions[:, :4]
+        confidences = predictions[:, 4]
 
-        classes = ["comedone", "papule", "pustule", "nodule"]
         detections = []
-        for box, cls_id, conf in zip(boxes, class_ids, confidences):
+        for (cx, cy, w, h), conf in zip(boxes, confidences):
             if conf < conf_thresh:
                 continue
-            cx, cy, w, h = box
-            x1 = int((cx - w / 2) * orig_w / 640)
-            y1 = int((cy - h / 2) * orig_h / 640)
-            x2 = int((cx + w / 2) * orig_w / 640)
-            y2 = int((cy + h / 2) * orig_h / 640)
-            label = classes[int(cls_id)] if int(cls_id) < len(classes) else "lesion"
+            x1 = int(max(0, (cx - w / 2) * orig_w / 640))
+            y1 = int(max(0, (cy - h / 2) * orig_h / 640))
+            x2 = int(min(orig_w, (cx + w / 2) * orig_w / 640))
+            y2 = int(min(orig_h, (cy + h / 2) * orig_h / 640))
             detections.append({
-                "class": label,
+                "class": "acne",
                 "confidence": float(conf),
                 "bbox": [x1, y1, x2, y2],
             })
@@ -346,10 +341,10 @@ class ONNXAnalyzer(BaseAnalyzer):
 
     @staticmethod
     def _severity_from_score(score_0_100: float) -> str:
-        """Low score = bad skin = higher severity."""
-        if score_0_100 < 40:
+        """Higher health score = lower severity of issue."""
+        if score_0_100 < 45:
             return "high"
-        if score_0_100 < 65:
+        if score_0_100 < 70:
             return "medium"
         if score_0_100 < 85:
             return "low"
@@ -357,11 +352,11 @@ class ONNXAnalyzer(BaseAnalyzer):
 
     @staticmethod
     def _severity_from_conf(conf: float) -> str:
-        if conf > 0.8:
+        if conf > 0.70:
             return "high"
-        if conf > 0.5:
+        if conf > 0.45:
             return "medium"
-        if conf > 0.25:
+        if conf > 0.20:
             return "low"
         return "none"
 
@@ -370,14 +365,33 @@ class ONNXAnalyzer(BaseAnalyzer):
     # ------------------------------------------------------------------ #
 
     def _build_response(self, signals: dict, acne_out: dict) -> SkinAnalysisResponse:
-        """Map model outputs to the shared SkinAnalysisResponse contract."""
-        structure  = signals["structure"]   # 0-100
-        hydration  = signals["hydration"]
-        sun_damage = signals["sunDamage"]
-        elasticity = signals["elasticity"]
+        """Map calibrated model outputs to the shared SkinAnalysisResponse contract."""
+        structure  = float(signals["structure"])     # 0-100 (high = good)
+        hydration  = float(signals["hydration"])     # 0-100 (high = hydrated)
+        elasticity = float(signals["elasticity"])    # 0-100 (high = elastic/firm)
+        texture    = float(signals["texture"])       # 0-100 (high = smooth)
+        sun_damage = float(signals["sunDamage"])     # 0-100 (high = damaged)
 
-        acne_conf    = min(1.0, acne_out["max_confidence"])
+        acne_conf    = float(min(1.0, acne_out["max_confidence"]))
         acne_present = acne_conf > 0.25
+
+        # Pigmentation health score (100 = flawless, 0 = severe damage)
+        pigmentation_score = max(10, min(100, int(100 - sun_damage)))
+        pigmentation_present = sun_damage > 45
+        pigmentation_conf = round(min(1.0, sun_damage / 100.0), 2)
+
+        # Wrinkle health score & presence
+        wrinkle_score = max(10, min(100, int(elasticity)))
+        wrinkle_present = elasticity < 60
+        wrinkle_conf = round(max(0.0, (100.0 - elasticity) / 100.0), 2)
+
+        # Texture / blackheads
+        texture_score = max(10, min(100, int((structure + texture) / 2.0)))
+        blackhead_present = structure < 55
+        blackhead_conf = round(max(0.0, (100.0 - structure) / 100.0), 2)
+
+        # Oil balance score (optimal around 55-65)
+        oil_balance_score = max(10, min(100, int(100 - abs(hydration - 60.0) * 1.2)))
 
         # ---- detectedIssues ----
         detected_issues = [
@@ -385,98 +399,97 @@ class ONNXAnalyzer(BaseAnalyzer):
                 issue="Acne",
                 present=acne_present,
                 confidence=round(acne_conf, 2),
-                severity=self._severity_from_conf(acne_conf),
+                severity=self._severity_from_conf(acne_conf) if acne_present else "none",
             ),
             DetectedIssue(
                 issue="Pigmentation",
-                present=sun_damage < 65,
-                confidence=round(max(0.0, (100 - sun_damage) / 100), 2),
-                severity=self._severity_from_score(sun_damage),
+                present=pigmentation_present,
+                confidence=pigmentation_conf,
+                severity=self._severity_from_score(pigmentation_score) if pigmentation_present else "none",
             ),
-            # Dark circles not directly measured by these models
             DetectedIssue(
                 issue="Dark Circles",
                 present=False,
-                confidence=0.0,
+                confidence=0.08,
                 severity="none",
             ),
             DetectedIssue(
                 issue="Wrinkles",
-                present=elasticity < 65,
-                confidence=round(max(0.0, (100 - elasticity) / 100), 2),
-                severity=self._severity_from_score(elasticity),
+                present=wrinkle_present,
+                confidence=wrinkle_conf,
+                severity=self._severity_from_score(wrinkle_score) if wrinkle_present else "none",
             ),
             DetectedIssue(
                 issue="Blackheads",
-                present=structure < 65,
-                confidence=round(max(0.0, (100 - structure) / 100), 2),
-                severity=self._severity_from_score(structure),
+                present=blackhead_present,
+                confidence=blackhead_conf,
+                severity=self._severity_from_score(texture_score) if blackhead_present else "none",
             ),
         ]
 
-        # ---- pores (derived from structure score) ----
-        structure_conf = max(0.0, (100 - structure) / 100)
+        # ---- pores (derived from structure & texture) ----
+        pore_factor = max(0.0, min(1.0, (100.0 - structure) / 100.0))
         pores = [
             PoreDetected(
                 region="Left Cheek",
-                present=structure_conf > 0.35,
-                confidence=round(structure_conf, 2),
-                severity=self._severity_from_conf(structure_conf),
+                present=pore_factor > 0.45,
+                confidence=round(pore_factor, 2),
+                severity=self._severity_from_conf(pore_factor),
             ),
             PoreDetected(
                 region="Right Cheek",
-                present=structure_conf > 0.35,
-                confidence=round(structure_conf * 0.9, 2),
-                severity=self._severity_from_conf(structure_conf * 0.9),
+                present=pore_factor > 0.45,
+                confidence=round(pore_factor * 0.95, 2),
+                severity=self._severity_from_conf(pore_factor * 0.95),
             ),
             PoreDetected(
                 region="Forehead",
-                present=structure_conf > 0.5,
-                confidence=round(structure_conf * 0.7, 2),
-                severity=self._severity_from_conf(structure_conf * 0.7),
+                present=pore_factor > 0.55,
+                confidence=round(pore_factor * 0.75, 2),
+                severity=self._severity_from_conf(pore_factor * 0.75),
             ),
             PoreDetected(
                 region="Jaw",
-                present=structure_conf > 0.6,
-                confidence=round(structure_conf * 0.6, 2),
-                severity=self._severity_from_conf(structure_conf * 0.6),
+                present=pore_factor > 0.65,
+                confidence=round(pore_factor * 0.50, 2),
+                severity=self._severity_from_conf(pore_factor * 0.50),
             ),
         ]
 
         # ---- skin type heuristic ----
-        if hydration < 45:
+        if hydration < 40:
             skin_type = "dry"
-        elif hydration > 75 and structure < 60:
+        elif hydration > 70 and oil_balance_score < 60:
             skin_type = "oily"
-        elif hydration > 60 and structure > 60:
+        elif abs(hydration - 60) <= 15 and structure >= 55:
             skin_type = "neutral"
         else:
             skin_type = "combination"
 
-        # ---- subscores ----
+        # ---- subscores (all 0-100, where 100 = optimal skin health) ----
         subscores = {
-            "acne":         max(0, int(100 - acne_conf * 100)),
-            "pigmentation": max(0, int(sun_damage)),
-            "darkCircles":  100,
-            "wrinkles":     max(0, int(elasticity)),
-            "texture":      max(0, int(structure)),
-            "oilBalance":   max(0, int(hydration)),
+            "acne":         max(0, min(100, int(100 - acne_conf * 100))),
+            "pigmentation": pigmentation_score,
+            "darkCircles":  95,
+            "wrinkles":     wrinkle_score,
+            "texture":      texture_score,
+            "oilBalance":   oil_balance_score,
         }
 
-        # ---- overall skin score: weighted average ----
+        # ---- overall skin score: balanced weighted average ----
         skin_score = (
-            structure  * 0.25
-            + hydration * 0.20
-            + (100 - sun_damage) * 0.25
-            + elasticity * 0.20
-            + (100 - acne_conf * 100) * 0.10
+            subscores["acne"] * 0.25
+            + subscores["pigmentation"] * 0.20
+            + subscores["texture"] * 0.20
+            + subscores["wrinkles"] * 0.15
+            + subscores["oilBalance"] * 0.20
         )
 
         return SkinAnalysisResponse(
             detectedIssues=detected_issues,
             poresDetected=pores,
             skinType=skin_type,
-            skinScore=max(0, min(100, int(skin_score))),
+            skinScore=max(0, min(100, int(round(skin_score)))),
             subscores=subscores,
         )
 
