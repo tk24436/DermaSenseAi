@@ -162,3 +162,7 @@ target/
 .vscode/
 .idea/
 
+# Internal Team Documentation
+docs/*.docx
+docs/PROJECT_*.md
+docs/FRONTEND_*.md
