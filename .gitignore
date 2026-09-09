@@ -147,6 +147,12 @@ __pycache__/
 *.pyc
 venv/
 .env
+*.db
+*.sqlite
+*.sqlite3
+ai-service/models/*.onnx
+ai-service/models/*.onnx.data
+ai-service/models/*.pt
 
 # Java (backend)
 target/
@@ -155,3 +161,8 @@ target/
 # IDE
 .vscode/
 .idea/
+
+# Internal Team Documentation
+docs/*.docx
+docs/PROJECT_*.md
+docs/FRONTEND_*.md
