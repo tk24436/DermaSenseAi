@@ -1,12 +1,17 @@
-def generate_routine(skin_analysis: dict) -> dict:
+def generate_routine(skin_analysis: dict, skin_profile: dict = None) -> dict:
     skin_type = skin_analysis.get("skinType", "neutral")
     issues = skin_analysis.get("detectedIssues", [])
+    
+    if skin_profile is None:
+        skin_profile = {}
+    allergies = [a.lower() for a in skin_profile.get("allergies", [])]
     
     routine = {
         "morning": [],
         "night": [],
         "weekly": []
     }
+
     
     # Base Routine based on Skin Type
     if skin_type == "oily":
@@ -41,5 +46,16 @@ def generate_routine(skin_analysis: dict) -> dict:
                 routine["night"].append({"step": "Treatment", "product": "Retinol Serum"})
             elif issue_name == "blackheads":
                 routine["weekly"].append({"step": "Exfoliation", "product": "BHA Liquid Exfoliant"})
+
+    # Filter out products that contain ingredients the user is allergic to
+    if allergies:
+        for time_of_day in ["morning", "night", "weekly"]:
+            filtered_steps = []
+            for step in routine[time_of_day]:
+                product_lower = step["product"].lower()
+                # If no allergy is found in the product string, keep it
+                if not any(allergy in product_lower for allergy in allergies):
+                    filtered_steps.append(step)
+            routine[time_of_day] = filtered_steps
 
     return routine
