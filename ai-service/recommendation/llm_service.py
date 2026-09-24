@@ -10,17 +10,16 @@ def generate_explanation_and_insights(skin_analysis: dict, skin_profile: dict, r
         routine=json.dumps(routine, indent=2)
     )
     
-    client = genai.Client()
-    
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-        config={
-            "response_mime_type": "application/json"
-        }
-    )
-    
     try:
+        client = genai.Client()
+        
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json"
+            }
+        )
         data = json.loads(response.text)
         return data
     except Exception as e:
