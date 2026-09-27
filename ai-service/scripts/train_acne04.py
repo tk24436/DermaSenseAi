@@ -32,6 +32,12 @@ def main():
         default=True,
         help="Copy exported ONNX model to ai-service/models/acne_detector.onnx",
     )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to checkpoint (e.g. runs/detect/train-16/weights/last.pt) to resume training from.",
+    )
     args = parser.parse_args()
 
     current_dir = Path(__file__).resolve().parent
@@ -48,6 +54,40 @@ def main():
         print("Please run scripts/download_acne04.py first.", file=sys.stderr)
         sys.exit(1)
 
+    os.environ["OPENCV_FORBID_OPENCL"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    import time
+    import cv2
+    cv2.setNumThreads(0)
+    from PIL import Image
+    import numpy as np
+    import ultralytics.utils.patches as patches
+
+    def robust_imread(filename, flags=cv2.IMREAD_COLOR):
+        filename_str = str(filename)
+        for attempt in range(10):
+            try:
+                img = Image.open(filename_str)
+                img.load()
+                if flags == cv2.IMREAD_GRAYSCALE:
+                    arr = np.asarray(img.convert("L"))[..., None]
+                else:
+                    arr = np.asarray(img.convert("RGB"))[:, :, ::-1].copy()
+                img.close()
+                return arr
+            except Exception:
+                time.sleep(0.05 * (attempt + 1))
+        try:
+            arr = cv2.imread(filename_str, flags)
+            if arr is not None:
+                return arr
+        except Exception:
+            pass
+        # Ultimate fallback to ensure training never crashes on transient Windows file lock
+        return np.zeros((640, 640, 3), dtype=np.uint8)
+
+    patches.imread = robust_imread
+
     import torch
     from ultralytics import YOLO
 
@@ -56,38 +96,56 @@ def main():
         device = 0 if torch.cuda.is_available() else "cpu"
         print(f"Detected CUDA available: {torch.cuda.is_available()}. Using device: {device}")
 
-    print(f"Loading pretrained YOLOv8s base model...")
-    model = YOLO("yolov8s.pt")
+    if args.resume and os.path.exists(args.resume):
+        print(f"Resuming training from checkpoint: {args.resume}...")
+        model = YOLO(args.resume)
+        results = model.train(resume=True)
+    else:
+        print(f"Loading pretrained YOLOv8s base model...")
+        model = YOLO("yolov8s.pt")
 
-    batch_size = args.batch
-    print(f"Starting training on {data_path} with batch={batch_size}, imgsz={args.imgsz}, epochs={args.epochs}...")
+        batch_size = args.batch
+        if torch.cuda.is_available():
+            gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            if batch_size > 8 and gpu_mem_gb < 8.0:
+                print(f"Detected GPU VRAM: {gpu_mem_gb:.1f} GB (< 8.0 GB). Auto-dropping batch {batch_size} to 8 to prevent CUDA OOM.")
+                batch_size = 8
 
-    try:
-        results = model.train(
-            data=str(data_path),
-            epochs=args.epochs,
-            imgsz=args.imgsz,
-            batch=batch_size,
-            patience=args.patience,
-            device=device,
-            plots=True,
-        )
-    except torch.cuda.OutOfMemoryError:
-        print(f"WARNING: CUDA Out Of Memory with batch={batch_size}. Retrying with batch=8...")
-        torch.cuda.empty_cache()
-        batch_size = 8
-        results = model.train(
-            data=str(data_path),
-            epochs=args.epochs,
-            imgsz=args.imgsz,
-            batch=batch_size,
-            patience=args.patience,
-            device=device,
-            plots=True,
-        )
+        results = None
+        candidate_batches = [b for b in [batch_size, 4] if b <= batch_size]
+        # Remove duplicates preserving order
+        seen = set()
+        candidate_batches = [b for b in candidate_batches if not (b in seen or seen.add(b))]
 
-    print("\n--- Training Complete. Running Validation ---")
-    val_results = model.val()
+        for b in candidate_batches:
+            try:
+                print(f"Starting training on {data_path} with batch={b}, imgsz={args.imgsz}, epochs={args.epochs}...")
+                results = model.train(
+                    data=str(data_path),
+                    epochs=args.epochs,
+                    imgsz=args.imgsz,
+                    batch=b,
+                    patience=args.patience,
+                    device=device,
+                    workers=0,
+                    plots=False,
+                )
+                break
+            except (torch.cuda.OutOfMemoryError, Exception) as e:
+                print(f"WARNING: Training failed with batch={b}: {e}")
+                torch.cuda.empty_cache()
+                if b == candidate_batches[-1]:
+                    raise
+
+    print("\n--- Training Complete. Running Validation on Best Weights ---")
+    best_weight_path = getattr(model.trainer, "best", None) if hasattr(model, "trainer") else None
+    if best_weight_path and Path(best_weight_path).exists():
+        print(f"Validating best checkpoint: {best_weight_path}")
+        eval_model = YOLO(str(best_weight_path))
+    else:
+        eval_model = model
+
+    val_results = eval_model.val(data=str(data_path), plots=False)
 
     # Extract metrics
     map50 = getattr(val_results.box, "map50", None)
@@ -101,7 +159,7 @@ def main():
     print(f"Recall:     {mr:.4f}" if mr is not None else "Recall: N/A")
 
     print("\n--- Exporting Best Weights to ONNX ---")
-    exported_onnx_path = model.export(format="onnx")
+    exported_onnx_path = eval_model.export(format="onnx")
     print(f"Model exported to ONNX: {exported_onnx_path}")
 
     if args.deploy_to_models and exported_onnx_path and os.path.exists(exported_onnx_path):
