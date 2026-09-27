@@ -153,6 +153,9 @@ venv/
 ai-service/models/*.onnx
 ai-service/models/*.onnx.data
 ai-service/models/*.pt
+*.pt
+ai-service/data/
+runs/
 
 # Java (backend)
 target/
