@@ -80,6 +80,40 @@ async def analyze_image(
             detail=f"Image exceeds maximum size of {MAX_UPLOAD_BYTES // (1024*1024)} MB",
         )
 
+    # --- OpenCV Preprocessing & Validation ---
+    import cv2
+    import numpy as np
+
+    nparr = np.frombuffer(content, np.uint8)
+    cv_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if cv_img is None:
+        raise HTTPException(status_code=400, detail="Invalid or corrupt image file.")
+
+    height, width = cv_img.shape[:2]
+    if height < 150 or width < 150:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Image resolution too small ({width}x{height}px). Minimum required is 150x150 pixels.",
+        )
+
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+    mean_brightness = float(np.mean(gray))
+    if mean_brightness < 40.0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Image is too dark (average brightness {mean_brightness:.1f}/255). Please upload a well-lit photo.",
+        )
+
+    # Haar Cascade face detector
+    face_cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    face_cascade = cv2.CascadeClassifier(face_cascade_path)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(60, 60))
+    if len(faces) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No face detected in the image. Please upload a clear frontal face photo.",
+        )
+
     # --- Analysis ---
     try:
         analyzer = get_analyzer()
