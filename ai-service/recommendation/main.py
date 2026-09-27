@@ -15,7 +15,7 @@ class RecommendRequest(BaseModel):
 @app.post("/recommend")
 async def recommend(request: RecommendRequest):
     try:
-        routine = generate_routine(request.skinAnalysis)
+        routine = generate_routine(request.skinAnalysis, request.skinProfile)
         llm_response = generate_explanation_and_insights(
             skin_analysis=request.skinAnalysis,
             skin_profile=request.skinProfile,
@@ -25,7 +25,8 @@ async def recommend(request: RecommendRequest):
         return {
             "routine": routine,
             "explanation": llm_response.get("explanation", ""),
-            "insights": llm_response.get("insights", [])
+            "insights": llm_response.get("insights", []),
+            "disclaimer": "*Disclaimer: This is not medical advice. Please consult a dermatologist for medical concerns.*"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
