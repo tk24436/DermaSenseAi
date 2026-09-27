@@ -1,7 +1,10 @@
 import os
 import json
 from google import genai
-from .prompts import RECOMMENDATION_PROMPT
+try:
+    from .prompts import RECOMMENDATION_PROMPT
+except ImportError:
+    from prompts import RECOMMENDATION_PROMPT
 
 def generate_explanation_and_insights(skin_analysis: dict, skin_profile: dict, routine: dict) -> dict:
     prompt = RECOMMENDATION_PROMPT.format(

@@ -2,8 +2,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
 
-from .routine_builder import generate_routine
-from .llm_service import generate_explanation_and_insights
+try:
+    from .routine_builder import generate_routine
+    from .llm_service import generate_explanation_and_insights
+except ImportError:
+    from routine_builder import generate_routine
+    from llm_service import generate_explanation_and_insights
 
 app = FastAPI(title="DermaSense AI - Recommendation Engine")
 
