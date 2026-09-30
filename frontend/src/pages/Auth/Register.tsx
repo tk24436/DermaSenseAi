@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Sparkles, User as UserIcon, Mail, Lock, ArrowRight, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { User as UserIcon, Mail, Lock, ArrowRight, AlertCircle, Eye, EyeOff, Sparkles } from 'lucide-react';
 
 export const Register: React.FC = () => {
   const { register } = useAuth();
@@ -30,73 +30,72 @@ export const Register: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="glass-panel rounded-3xl p-6 sm:p-8 shadow-2xl shadow-teal-500/5 relative overflow-hidden">
-          <div className="absolute -top-16 -right-16 w-32 h-32 bg-teal-500/20 rounded-full blur-2xl pointer-events-none" />
-          <div className="absolute -bottom-16 -left-16 w-32 h-32 bg-emerald-500/20 rounded-full blur-2xl pointer-events-none" />
-
+    <div className="min-h-[calc(100vh-8rem)] flex items-center justify-center p-4">
+      <div className="w-full max-w-md animate-fade-in">
+        <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-8 sm:p-10 border border-black/5 dark:border-white/10 shadow-soft relative overflow-hidden space-y-6">
           {/* Header */}
-          <div className="text-center mb-8">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-500 via-emerald-400 to-indigo-500 p-0.5 mx-auto mb-3 shadow-lg shadow-teal-500/20">
-              <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-teal-400" />
-              </div>
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-2xl bg-[#E8ECE9] dark:bg-[#252D28] text-[#3B5249] dark:text-emerald-300 mx-auto flex items-center justify-center shadow-soft">
+              <Sparkles className="w-6 h-6" />
             </div>
-            <h2 className="text-2xl font-bold text-white">Create Account</h2>
-            <p className="text-xs text-slate-400 mt-1">Start tracking your skin health with DermaSense AI</p>
+            <h2 className="text-2xl font-serif text-[#1A1D1A] dark:text-white">
+              Create Your Account
+            </h2>
+            <p className="text-xs text-[#717771] dark:text-[#A3B0A9]">
+              Begin your clinical skincare intelligence journey
+            </p>
           </div>
 
           {/* Error Message */}
           {error && (
-            <div className="mb-6 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-start gap-2.5 text-xs text-rose-300">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+            <div className="badge-action p-3 rounded-2xl flex items-start gap-2.5 text-xs font-medium">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
               <span>{error}</span>
             </div>
           )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-[#1A1D1A] dark:text-[#EFEFEA]">
                 Full Name
               </label>
               <div className="relative">
-                <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <UserIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#717771]" />
                 <input
                   type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Tasmiya Khan"
-                  className="w-full glass-input rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all"
+                  placeholder="e.g. Anne Miller"
+                  className="w-full pl-10 pr-4 py-3 rounded-2xl text-xs bg-[#F7F7F4] dark:bg-[#141714] border border-black/10 dark:border-white/10 text-[#1A1D1A] dark:text-white placeholder:text-[#717771] focus:outline-none focus:border-[#3B5249] transition-colors"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-[#1A1D1A] dark:text-[#EFEFEA]">
                 Email Address
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#717771]" />
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="tasmiya@dermasense.ai"
-                  className="w-full glass-input rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all"
+                  placeholder="your.email@example.com"
+                  className="w-full pl-10 pr-4 py-3 rounded-2xl text-xs bg-[#F7F7F4] dark:bg-[#141714] border border-black/10 dark:border-white/10 text-[#1A1D1A] dark:text-white placeholder:text-[#717771] focus:outline-none focus:border-[#3B5249] transition-colors"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-[#1A1D1A] dark:text-[#EFEFEA]">
                 Password
               </label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#717771]" />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
@@ -104,12 +103,12 @@ export const Register: React.FC = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="At least 6 characters"
-                  className="w-full glass-input rounded-xl pl-10 pr-10 py-2.5 text-sm transition-all"
+                  className="w-full pl-10 pr-10 py-3 rounded-2xl text-xs bg-[#F7F7F4] dark:bg-[#141714] border border-black/10 dark:border-white/10 text-[#1A1D1A] dark:text-white placeholder:text-[#717771] focus:outline-none focus:border-[#3B5249] transition-colors"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#717771] hover:text-[#1A1D1A] dark:hover:text-white cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -119,26 +118,25 @@ export const Register: React.FC = () => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3 px-4 rounded-xl text-sm font-semibold text-slate-950 bg-gradient-to-r from-teal-400 via-emerald-400 to-teal-300 hover:brightness-110 active:scale-[0.99] transition-all shadow-lg shadow-teal-500/25 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer mt-2"
+              className="w-full py-3.5 rounded-2xl text-xs font-semibold bg-[#3B5249] hover:bg-[#2D4039] text-white shadow-soft flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer mt-2 active:scale-95"
             >
-              {isSubmitting ? (
-                <span>Creating Account...</span>
-              ) : (
-                <>
-                  <span>Create Account</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
+              <span>{isSubmitting ? 'Creating account...' : 'Create Account'}</span>
+              <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
-          {/* Switch to Login */}
-          <p className="text-center text-xs text-slate-400 mt-6">
-            Already have an account?{' '}
-            <Link to="/login" className="text-teal-400 font-semibold hover:underline">
-              Log in
-            </Link>
-          </p>
+          {/* Footer Note */}
+          <div className="text-center pt-2 border-t border-black/5 dark:border-white/10">
+            <p className="text-xs text-[#717771]">
+              Already have an account?{' '}
+              <Link
+                to="/login"
+                className="text-[#3B5249] dark:text-emerald-400 font-bold hover:underline"
+              >
+                Sign in here
+              </Link>
+            </p>
+          </div>
         </div>
       </div>
     </div>

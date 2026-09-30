@@ -1,74 +1,279 @@
 @import "tailwindcss";
 
+/* Force Tailwind v4 to only trigger dark: classes when .dark is present on an ancestor (class-based dark mode) */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
-    --color-brand-50: #f0fdf4;
-    --color-brand-100: #dcfce7;
-    --color-brand-500: #10b981;
-    --color-brand-600: #059669;
-    --color-brand-700: #047857;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-serif: 'Instrument Serif', Georgia, serif;
+    
+    /* Luxury Botanical Skincare Palette */
+    --color-brand-bg: #EFEFEA;
+    --color-brand-card: #FFFFFF;
+    --color-brand-dark: #1A1D1A;
+    --color-brand-sage: #3B5249;
+    --color-brand-sage-light: #E8ECE9;
+    --color-brand-sage-hover: #2D4039;
+    --color-brand-accent: #C5D1C5;
+    --color-brand-cream: #F7F7F4;
+    --color-brand-muted: #717771;
+  }
+
+  .dark {
+    --color-brand-bg: #141714;
+    --color-brand-card: #1D221E;
+    --color-brand-dark: #FFFFFF;
+    --color-brand-sage: #4E6B60;
+    --color-brand-sage-light: #252D28;
+    --color-brand-sage-hover: #5F8274;
+    --color-brand-accent: #2E3A33;
+    --color-brand-cream: #181D19;
+    --color-brand-muted: #8E9991;
   }
 
   body {
-    @apply bg-slate-950 text-slate-100 antialiased selection:bg-teal-500 selection:text-white min-h-screen font-sans;
-    background-image: 
-      radial-gradient(at 0% 0%, rgba(20, 184, 166, 0.12) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
-      radial-gradient(at 50% 100%, rgba(168, 85, 247, 0.08) 0px, transparent 50%);
-    background-attachment: fixed;
+    font-family: var(--font-sans);
+    background-color: var(--color-brand-bg);
+    color: var(--color-brand-dark);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  .font-serif {
+    font-family: var(--font-serif);
   }
 }
 
-/* Glassmorphism Utilities */
-.glass-panel {
-  background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+/* Luxury Soft Shadows */
+.shadow-soft {
+  box-shadow: 0 20px 40px -15px rgba(26, 29, 26, 0.05), 0 0 15px 0 rgba(0, 0, 0, 0.02);
+}
+
+.shadow-soft-lg {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.08);
+}
+
+.shadow-neumorphic {
+  box-shadow: 6px 6px 16px #e0e0db, -6px -6px 16px #ffffff;
+}
+
+/* Card Surface with Smooth Hover Lift */
+.skincare-card {
+  background-color: #FFFFFF;
+  border: 1px solid rgba(26, 29, 26, 0.06);
+  border-radius: 24px;
+  box-shadow: 0 20px 40px -15px rgba(26, 29, 26, 0.05), 0 0 15px 0 rgba(0, 0, 0, 0.02);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.skincare-card:hover {
+  box-shadow: 0 25px 50px -12px rgba(26, 29, 26, 0.08);
+}
+
+.dark .skincare-card {
+  background-color: #1D221E;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.4);
+}
+.dark .skincare-card:hover {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
 }
 
-.glass-card {
-  background: rgba(30, 41, 59, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+/* Scannable Mesh Overlay */
+.scannable-mesh {
+  background-image: 
+    linear-gradient(to right, rgba(59, 82, 73, 0.25) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(59, 82, 73, 0.25) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
-.glass-input {
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #f8fafc;
-}
-
-.glass-input:focus {
-  border-color: #14b8a6;
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
-  outline: none;
-}
-
-/* Custom Scrollbars */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8);
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 1);
-}
-
-/* Pulse animation for scanner line */
-@keyframes scan {
+/* Animation Keyframes */
+@keyframes scanSweep {
   0% { top: 0%; opacity: 0.8; }
-  50% { top: 95%; opacity: 1; }
+  50% { top: 90%; opacity: 1; }
   100% { top: 0%; opacity: 0.8; }
 }
 
-.animate-scan {
-  animation: scan 2.5s ease-in-out infinite;
+.scan-line {
+  animation: scanSweep 4s ease-in-out infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 15px rgba(52, 211, 153, 0.3);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 0 25px rgba(52, 211, 153, 0.6);
+  }
+}
+
+@keyframes floatSubtle {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-4px); }
+}
+
+/* Smooth Animation Utilities */
+.animate-fade-in {
+  animation: fadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-float {
+  animation: floatSubtle 4s ease-in-out infinite;
+}
+
+/* Smooth interactive transitions */
+.transition-smooth {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Button Classes */
+.btn-primary, .btn-sage {
+  background-color: #3B5249;
+  color: #FFFFFF !important;
+  border-radius: 16px;
+  font-weight: 600;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-primary:hover, .btn-sage:hover {
+  background-color: #2D4039;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -6px rgba(59, 82, 73, 0.4);
+}
+.btn-primary:active, .btn-sage:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.btn-secondary {
+  background-color: #F7F7F4;
+  color: #1A1D1A;
+  border: 1px solid rgba(26, 29, 26, 0.1);
+  border-radius: 16px;
+  font-weight: 500;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-secondary:hover {
+  background-color: #EFEFEA;
+  transform: translateY(-1px);
+}
+.dark .btn-secondary {
+  background-color: #252D28;
+  color: #EFEFEA;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.dark .btn-secondary:hover {
+  background-color: #2F3933;
+}
+
+.btn-dark {
+  background-color: #1A1D1A;
+  color: #FFFFFF !important;
+  border-radius: 16px;
+  font-weight: 600;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-dark:hover {
+  background-color: #000000;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.4);
+}
+.btn-dark:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Badges */
+.badge-success {
+  background-color: #ECFDF5;
+  color: #065F46;
+  border: 1px solid #A7F3D0;
+  transition: all 0.2s ease;
+}
+.dark .badge-success {
+  background-color: rgba(6, 95, 70, 0.25);
+  color: #6EE7B7;
+  border: 1px solid rgba(110, 231, 183, 0.3);
+}
+
+.badge-action {
+  background-color: #FEF2F2;
+  color: #991B1B;
+  border: 1px solid #FECACA;
+  transition: all 0.2s ease;
+}
+.dark .badge-action {
+  background-color: rgba(153, 27, 27, 0.25);
+  color: #FCA5A5;
+  border: 1px solid rgba(252, 165, 165, 0.3);
+}
+
+.badge-concern {
+  background-color: #FFF1F2;
+  color: #9F1239;
+  border: 1px solid #FECDD3;
+  transition: all 0.2s ease;
+}
+.dark .badge-concern {
+  background-color: rgba(159, 18, 57, 0.25);
+  color: #FDA4AF;
+  border: 1px solid rgba(253, 164, 175, 0.3);
+}
+
+/* Custom Scrollbars */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #D1D5DB;
+  border-radius: 9999px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563;
 }

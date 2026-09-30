@@ -1,35 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUserProfileApi, updateUserProfileApi } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import type { UserProfile, SkinType, SensitivityLevel } from '../../types';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { ErrorAlert } from '../../components/common/ErrorAlert';
-import { User, ShieldAlert, Target, Save, CheckCircle, Sparkles, Plus, X } from 'lucide-react';
+import {
+  Save,
+  CheckCircle2,
+  Plus,
+  X,
+  Check,
+  Sparkles,
+} from 'lucide-react';
 
 const SKIN_TYPES: { id: SkinType; label: string; desc: string }[] = [
-  { id: 'oily', label: 'Oily', desc: 'Excess sebum, shine in T-zone & cheeks' },
-  { id: 'dry', label: 'Dry', desc: 'Flaky, tight feeling, needs rich moisture' },
-  { id: 'neutral', label: 'Neutral', desc: 'Well balanced moisture & oil levels' },
-  { id: 'combination', label: 'Combination', desc: 'Oily T-zone with neutral/dry cheeks' },
+  { id: 'combination', label: 'Combination', desc: 'Oily T-zone with balanced or dry cheeks' },
+  { id: 'dry', label: 'Dry', desc: 'Feels tight, prone to flakiness, craves rich moisture' },
+  { id: 'oily', label: 'Oily', desc: 'Excess sebum, shine across forehead & nose' },
+  { id: 'neutral', label: 'Normal', desc: 'Balanced hydration with minimal sensitivity' },
 ];
 
 const SENSITIVITY_LEVELS: { id: SensitivityLevel; label: string; desc: string }[] = [
-  { id: 'low', label: 'Low', desc: 'Rarely reacts to active skincare' },
-  { id: 'medium', label: 'Medium', desc: 'Occasional redness or mild tingling' },
-  { id: 'high', label: 'High', desc: 'Easily irritated, reactive to fragrance/acids' },
+  { id: 'low', label: 'Low', desc: 'Rarely reacts to active ingredients or fragrance' },
+  { id: 'medium', label: 'Moderate', desc: 'Occasional redness or mild tingling from strong acids' },
+  { id: 'high', label: 'High', desc: 'Easily irritated; prefers soothing, barrier-first formulas' },
 ];
 
 const AVAILABLE_GOALS = [
-  'Reduce Acne',
-  'Improve Texture',
-  'Minimize Pores',
-  'Fading Dark Spots',
-  'Anti-Aging / Fine Lines',
-  'Hydration & Barrier Repair',
-  'Oil Balance Control',
+  'Reduce acne',
+  'Improve texture',
+  'Minimize pores',
+  'Fade dark spots',
+  'Hydration & barrier repair',
+  'Oil balance',
+  'Anti-aging / fine lines',
 ];
 
 export const ProfileForm: React.FC = () => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   const {
@@ -47,7 +56,7 @@ export const ProfileForm: React.FC = () => {
     skinType: 'combination',
     sensitivity: 'medium',
     allergies: [],
-    goals: ['Reduce Acne', 'Improve Texture'],
+    goals: ['Reduce acne', 'Hydration & barrier repair'],
   });
 
   const [newAllergyInput, setNewAllergyInput] = useState('');
@@ -63,7 +72,7 @@ export const ProfileForm: React.FC = () => {
     mutationFn: updateUserProfileApi,
     onSuccess: (updatedProfile) => {
       queryClient.setQueryData(['userProfile'], updatedProfile);
-      setSuccessMessage('Skin profile updated successfully!');
+      setSuccessMessage('Your clinical skin profile has been saved.');
       setTimeout(() => setSuccessMessage(null), 3500);
     },
   });
@@ -101,36 +110,56 @@ export const ProfileForm: React.FC = () => {
     updateMutation.mutate(formState);
   };
 
-  if (isLoading) return <LoadingSpinner label="Fetching skin profile..." size="lg" />;
-  if (isError) return <ErrorAlert message={(error as Error).message} onRetry={() => refetch()} />;
+  if (isLoading) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center">
+        <LoadingSpinner label="Loading your clinical profile..." size="lg" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="max-w-4xl mx-auto px-6 py-16">
+        <ErrorAlert message={(error as Error).message} onRetry={() => refetch()} />
+      </div>
+    );
+  }
+
+  const displayName = user?.name || 'Anne Miller';
+  const displayEmail = user?.email || 'anne.miller@example.com';
+  const initial = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+    <div className="max-w-4xl mx-auto px-4 lg:px-8 py-8 space-y-8 animate-fade-in">
+      
+      {/* 1. Header with Save Action */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-black/5 dark:border-white/10">
         <div>
-          <div className="flex items-center gap-2 text-teal-400 text-xs font-bold uppercase tracking-wider mb-1">
-            <User className="w-4 h-4" />
-            <span>Personal Preferences</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white">Skin Profile Setup</h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Customize your skin characteristics for highly accurate AI routine recommendations.
+          <span className="text-xs uppercase tracking-widest text-[#3B5249] dark:text-emerald-400 font-bold">
+            Personal Dermatology File
+          </span>
+          <h1 className="font-serif text-3xl sm:text-4xl text-[#1A1D1A] dark:text-white mt-0.5">
+            Skin Profile & Characteristics
+          </h1>
+          <p className="text-xs sm:text-sm text-[#717771] dark:text-[#A3B0A9]">
+            Parameters powering your real-time formulation and ingredient compatibility filters.
           </p>
         </div>
 
         <button
           onClick={handleSubmit}
           disabled={updateMutation.isPending}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-950 bg-gradient-to-r from-teal-400 to-emerald-400 hover:brightness-110 active:scale-[0.98] transition-all shadow-lg shadow-teal-500/20 disabled:opacity-50 cursor-pointer"
+          className="px-7 py-3 rounded-2xl bg-[#3B5249] hover:bg-[#2D4039] text-white text-xs font-semibold shadow-soft flex items-center gap-2 self-start sm:self-auto disabled:opacity-50 transition-all cursor-pointer active:scale-95"
         >
           <Save className="w-4 h-4" />
-          {updateMutation.isPending ? 'Saving...' : 'Save Profile'}
+          <span>{updateMutation.isPending ? 'Saving...' : 'Save Profile'}</span>
         </button>
       </div>
 
       {successMessage && (
-        <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-500/10 animate-fade-in">
-          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-200 text-xs font-medium flex items-center gap-2.5 shadow-soft">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>{successMessage}</span>
         </div>
       )}
@@ -139,158 +168,245 @@ export const ProfileForm: React.FC = () => {
         <ErrorAlert message={(updateMutation.error as Error).message} />
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* 1. Skin Type Selection */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 mb-4">
-            <Sparkles className="w-4 h-4 text-teal-400" />
-            Primary Skin Type
-          </h3>
+      {/* 2. Avatar Card Banner (Directly matches Tab 4 from mockup) */}
+      <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-6 lg:p-8 border border-black/5 dark:border-white/10 shadow-soft space-y-6">
+        <div className="flex items-center gap-5 pb-6 border-b border-black/5 dark:border-white/10">
+          <div className="w-16 h-16 rounded-2xl bg-[#3B5249] text-white flex items-center justify-center font-serif text-2xl font-bold shadow-soft ring-4 ring-[#F7F7F4] dark:ring-[#141714] shrink-0">
+            {initial}
+          </div>
+          <div>
+            <h2 className="font-serif text-2xl lg:text-3xl text-[#1A1D1A] dark:text-white">
+              {displayName}
+            </h2>
+            <p className="text-xs text-[#717771] mt-0.5">
+              {displayEmail} • {formState.skinType.toUpperCase()} Dermis Profile
+            </p>
+          </div>
+        </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Primary Characteristics Quick Grid (Tab 4 layout) */}
+        <div className="space-y-3">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#1A1D1A] dark:text-white">
+            Primary Characteristics
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="p-4 bg-[#F7F7F4] dark:bg-[#141714] rounded-2xl border border-black/5 dark:border-white/10 text-center">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-[#717771]">Skin Type</span>
+              <div className="text-xs font-bold text-[#1A1D1A] dark:text-white mt-0.5 capitalize">
+                {formState.skinType}
+              </div>
+            </div>
+            <div className="p-4 bg-[#F7F7F4] dark:bg-[#141714] rounded-2xl border border-black/5 dark:border-white/10 text-center">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-[#717771]">Fitzpatrick Scale</span>
+              <div className="text-xs font-bold text-[#1A1D1A] dark:text-white mt-0.5">
+                Type II (Fair / Balanced)
+              </div>
+            </div>
+            <div className="p-4 bg-[#F7F7F4] dark:bg-[#141714] rounded-2xl border border-black/5 dark:border-white/10 text-center col-span-2 sm:col-span-1">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-[#717771]">Sensitivity</span>
+              <div className="text-xs font-bold text-[#1A1D1A] dark:text-white mt-0.5 capitalize">
+                {formState.sensitivity}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Form Configuration Sections */}
+      <form onSubmit={handleSubmit} className="space-y-6">
+        
+        {/* Section 1: Skin Type Selection */}
+        <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-6 lg:p-8 border border-black/5 dark:border-white/10 shadow-soft space-y-4">
+          <div>
+            <h3 className="font-serif text-xl text-[#1A1D1A] dark:text-white">
+              Skin Classification
+            </h3>
+            <p className="text-xs text-[#717771]">
+              Select your prevailing sebum balance and baseline epidermal state
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
             {SKIN_TYPES.map((type) => {
               const isSelected = formState.skinType === type.id;
               return (
                 <div
                   key={type.id}
                   onClick={() => setFormState({ ...formState, skinType: type.id })}
-                  className={`p-4 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col justify-between ${
+                  className={`p-4 rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-2 ${
                     isSelected
-                      ? 'bg-teal-500/15 border-teal-500/50 shadow-md shadow-teal-500/10'
-                      : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+                      ? 'bg-[#E8ECE9] dark:bg-[#252D28] border-[#3B5249] shadow-soft'
+                      : 'bg-[#F7F7F4] dark:bg-[#141714] border-black/5 dark:border-white/5 hover:border-black/20'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-semibold text-white capitalize">{type.label}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-[#1A1D1A] dark:text-white">
+                      {type.label}
+                    </span>
                     <div
                       className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        isSelected ? 'border-teal-400 bg-teal-400' : 'border-slate-600'
+                        isSelected ? 'border-[#3B5249] bg-[#3B5249] text-white' : 'border-black/20'
                       }`}
                     >
-                      {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                      {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                     </div>
                   </div>
-                  <p className="text-xs text-slate-400">{type.desc}</p>
+                  <p className="text-[11px] text-[#717771] leading-relaxed">
+                    {type.desc}
+                  </p>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* 2. Sensitivity Level */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 mb-4">
-            <ShieldAlert className="w-4 h-4 text-amber-400" />
-            Skin Sensitivity Level
-          </h3>
+        {/* Section 2: Sensitivity Selection */}
+        <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-6 lg:p-8 border border-black/5 dark:border-white/10 shadow-soft space-y-4">
+          <div>
+            <h3 className="font-serif text-xl text-[#1A1D1A] dark:text-white">
+              Barrier Sensitivity Level
+            </h3>
+            <p className="text-xs text-[#717771]">
+              Frequency of erythema, burning, or tingling upon contact with actives
+            </p>
+          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             {SENSITIVITY_LEVELS.map((level) => {
               const isSelected = formState.sensitivity === level.id;
               return (
                 <div
                   key={level.id}
                   onClick={() => setFormState({ ...formState, sensitivity: level.id })}
-                  className={`p-4 rounded-xl border transition-all duration-200 cursor-pointer ${
+                  className={`p-4 rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-2 ${
                     isSelected
-                      ? 'bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-500/10'
-                      : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+                      ? 'bg-[#E8ECE9] dark:bg-[#252D28] border-[#3B5249] shadow-soft'
+                      : 'bg-[#F7F7F4] dark:bg-[#141714] border-black/5 dark:border-white/5 hover:border-black/20'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-semibold text-white capitalize">{level.label}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-[#1A1D1A] dark:text-white">
+                      {level.label}
+                    </span>
                     <div
                       className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        isSelected ? 'border-amber-400 bg-amber-400' : 'border-slate-600'
+                        isSelected ? 'border-[#3B5249] bg-[#3B5249] text-white' : 'border-black/20'
                       }`}
                     >
-                      {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                      {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                     </div>
                   </div>
-                  <p className="text-xs text-slate-400">{level.desc}</p>
+                  <p className="text-[11px] text-[#717771] leading-relaxed">
+                    {level.desc}
+                  </p>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* 3. Allergies & Sensitivities */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 mb-1">
-            <ShieldAlert className="w-4 h-4 text-rose-400" />
-            Known Ingredient Allergies & Sensitivities
-          </h3>
-          <p className="text-xs text-slate-400 mb-4">
-            Ingredients listed here will be strictly excluded from your AI recommendations.
-          </p>
+        {/* Section 3: Targeted Skincare Goals */}
+        <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-6 lg:p-8 border border-black/5 dark:border-white/10 shadow-soft space-y-4">
+          <div>
+            <h3 className="font-serif text-xl text-[#1A1D1A] dark:text-white">
+              Targeted Skincare Objectives
+            </h3>
+            <p className="text-xs text-[#717771]">
+              Select focus zones to customize your routine steps and product formulas
+            </p>
+          </div>
 
-          <div className="flex items-center gap-2 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {AVAILABLE_GOALS.map((goal) => {
+              const isSelected = formState.goals.includes(goal);
+              return (
+                <div
+                  key={goal}
+                  onClick={() => handleToggleGoal(goal)}
+                  className={`p-3.5 rounded-2xl border text-xs font-semibold transition-all duration-150 cursor-pointer flex items-center justify-between ${
+                    isSelected
+                      ? 'bg-[#1A1D1A] text-white border-[#1A1D1A] shadow-soft'
+                      : 'bg-[#F7F7F4] dark:bg-[#141714] text-[#1A1D1A] dark:text-white border-black/5 hover:border-black/20'
+                  }`}
+                >
+                  <span>{goal}</span>
+                  <div
+                    className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                      isSelected ? 'border-white bg-white text-[#1A1D1A]' : 'border-black/20'
+                    }`}
+                  >
+                    {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Section 4: Allergies & Avoided Ingredients */}
+        <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-6 lg:p-8 border border-black/5 dark:border-white/10 shadow-soft space-y-4">
+          <div>
+            <h3 className="font-serif text-xl text-[#1A1D1A] dark:text-white">
+              Allergens & Excluded Actives
+            </h3>
+            <p className="text-xs text-[#717771]">
+              DermaSense will filter out routines containing these compounds
+            </p>
+          </div>
+
+          {/* Current tags */}
+          <div className="flex flex-wrap gap-2">
+            {formState.allergies.length > 0 ? (
+              formState.allergies.map((allergy) => (
+                <span
+                  key={allergy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-rose-50 text-rose-800 border border-rose-200"
+                >
+                  <span>{allergy}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAllergy(allergy)}
+                    className="hover:text-black cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-[#717771] italic">No active allergen exclusions listed.</span>
+            )}
+          </div>
+
+          {/* Add input */}
+          <div className="flex gap-2 pt-1 max-w-md">
             <input
               type="text"
               value={newAllergyInput}
               onChange={(e) => setNewAllergyInput(e.target.value)}
-              placeholder="e.g. Salicylic Acid, Fragrance, Benzoyl Peroxide"
-              className="flex-1 glass-input rounded-xl px-4 py-2 text-xs transition-all"
+              placeholder="e.g. Fragrance, Sulfates, Essential Oils..."
+              className="flex-1 px-4 py-2.5 rounded-2xl text-xs bg-[#F7F7F4] dark:bg-[#141714] border border-black/10 dark:border-white/10 text-[#1A1D1A] dark:text-white placeholder:text-[#717771] focus:outline-none focus:border-[#3B5249]"
             />
             <button
               type="button"
               onClick={handleAddAllergy}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+              className="px-5 py-2.5 rounded-2xl text-xs font-semibold bg-white dark:bg-[#1D221E] hover:bg-[#F7F7F4] border border-black/10 text-[#1A1D1A] dark:text-white flex items-center gap-1 shadow-sm cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              Add
+              <span>Add</span>
             </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {formState.allergies.length === 0 ? (
-              <span className="text-xs text-slate-500 italic">No allergies added yet.</span>
-            ) : (
-              formState.allergies.map((allergy) => (
-                <span
-                  key={allergy}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300"
-                >
-                  {allergy}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveAllergy(allergy)}
-                    className="hover:text-white cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </span>
-              ))
-            )}
           </div>
         </div>
 
-        {/* 4. Skincare Goals */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 mb-4">
-            <Target className="w-4 h-4 text-emerald-400" />
-            Primary Skincare Goals
-          </h3>
-
-          <div className="flex flex-wrap gap-2.5">
-            {AVAILABLE_GOALS.map((goal) => {
-              const isSelected = formState.goals.includes(goal);
-              return (
-                <button
-                  type="button"
-                  key={goal}
-                  onClick={() => handleToggleGoal(goal)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all duration-200 cursor-pointer ${
-                    isSelected
-                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-sm shadow-teal-500/10'
-                      : 'bg-slate-900/50 text-slate-400 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  {isSelected ? `✓ ${goal}` : `+ ${goal}`}
-                </button>
-              );
-            })}
-          </div>
+        {/* Save Bar */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            disabled={updateMutation.isPending}
+            className="px-8 py-3.5 rounded-2xl bg-[#3B5249] hover:bg-[#2D4039] text-white text-xs font-semibold shadow-soft flex items-center gap-2 disabled:opacity-50 transition-all cursor-pointer active:scale-95"
+          >
+            <Sparkles className="w-4 h-4 text-emerald-300" />
+            <span>{updateMutation.isPending ? 'Saving Changes...' : 'Save Profile Changes'}</span>
+          </button>
         </div>
       </form>
     </div>
