@@ -12,7 +12,6 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
-import java.util.UUID;
 
 @Component
 public class JwtTokenProvider {
@@ -25,8 +24,7 @@ public class JwtTokenProvider {
     public JwtTokenProvider(
             @Value("${app.jwt.secret}") String jwtSecret,
             @Value("${app.jwt.expiration-ms:86400000}") long jwtExpirationMs) {
-        
-        // Ensure the secret is at least 256 bits (32 bytes)
+
         byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
         if (keyBytes.length < 32) {
             byte[] padded = new byte[32];
@@ -44,7 +42,7 @@ public class JwtTokenProvider {
 
         return Jwts.builder()
                 .subject(user.getEmail())
-                .claim("userId", user.getId().toString())
+                .claim("userId", user.getId())   // String — no .toString() needed
                 .claim("name", user.getName())
                 .claim("email", user.getEmail())
                 .issuedAt(now)
@@ -59,7 +57,7 @@ public class JwtTokenProvider {
 
         return Jwts.builder()
                 .subject(userPrincipal.getEmail())
-                .claim("userId", userPrincipal.getId().toString())
+                .claim("userId", userPrincipal.getId())
                 .claim("name", userPrincipal.getName())
                 .claim("email", userPrincipal.getEmail())
                 .issuedAt(now)
@@ -69,30 +67,26 @@ public class JwtTokenProvider {
     }
 
     public String getEmailFromToken(String token) {
-        Claims claims = Jwts.parser()
+        return Jwts.parser()
                 .verifyWith(secretKey)
                 .build()
                 .parseSignedClaims(token)
-                .getPayload();
-        return claims.getSubject();
+                .getPayload()
+                .getSubject();
     }
 
-    public UUID getUserIdFromToken(String token) {
+    public String getUserIdFromToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(secretKey)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
-        String userIdStr = claims.get("userId", String.class);
-        return UUID.fromString(userIdStr);
+        return claims.get("userId", String.class);
     }
 
     public boolean validateToken(String authToken) {
         try {
-            Jwts.parser()
-                    .verifyWith(secretKey)
-                    .build()
-                    .parseSignedClaims(authToken);
+            Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(authToken);
             return true;
         } catch (SignatureException ex) {
             logger.error("Invalid JWT signature: {}", ex.getMessage());

@@ -1,99 +1,55 @@
 package com.dermasense.auth.entity;
 
-import jakarta.persistence.*;
-import java.time.Instant;
-import java.util.UUID;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
 
-@Entity
-@Table(name = "users", indexes = {
-    @Index(name = "idx_user_email", columnList = "email", unique = true)
-})
+import java.time.Instant;
+
+@Document(collection = "users")
 public class User {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(name = "id", updatable = false, nullable = false)
-    private UUID id;
+    private String id;
 
-    @Column(name = "name", nullable = false)
     private String name;
 
-    @Column(name = "email", nullable = false, unique = true)
+    @Indexed(unique = true)
     private String email;
 
-    @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @CreatedDate
     private Instant createdAt;
 
-    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    // SkinProfile embedded directly in User document (no separate collection needed)
     private SkinProfile skinProfile;
 
-    public User() {
-    }
+    public User() {}
 
     public User(String name, String email, String passwordHash) {
         this.name = name;
         this.email = email;
         this.passwordHash = passwordHash;
+        this.createdAt = Instant.now();
     }
 
-    @PrePersist
-    protected void onCreate() {
-        if (this.createdAt == null) {
-            this.createdAt = Instant.now();
-        }
-    }
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
 
-    public UUID getId() {
-        return id;
-    }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
 
-    public void setId(UUID id) {
-        this.id = id;
-    }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
 
-    public String getName() {
-        return name;
-    }
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 
-    public void setName(String name) {
-        this.name = name;
-    }
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public String getPasswordHash() {
-        return passwordHash;
-    }
-
-    public void setPasswordHash(String passwordHash) {
-        this.passwordHash = passwordHash;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public SkinProfile getSkinProfile() {
-        return skinProfile;
-    }
-
-    public void setSkinProfile(SkinProfile skinProfile) {
-        this.skinProfile = skinProfile;
-        if (skinProfile != null) {
-            skinProfile.setUser(this);
-        }
-    }
+    public SkinProfile getSkinProfile() { return skinProfile; }
+    public void setSkinProfile(SkinProfile skinProfile) { this.skinProfile = skinProfile; }
 }

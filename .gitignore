@@ -169,3 +169,6 @@ target/
 docs/*.docx
 docs/PROJECT_*.md
 docs/FRONTEND_*.md
+
+# MongoDB local data directory
+backend/data/

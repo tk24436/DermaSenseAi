@@ -4,77 +4,68 @@ import com.dermasense.auth.dto.SkinProfileRequest;
 import com.dermasense.auth.dto.SkinProfileResponse;
 import com.dermasense.auth.entity.SkinProfile;
 import com.dermasense.auth.entity.User;
-import com.dermasense.auth.repository.SkinProfileRepository;
+import com.dermasense.auth.repository.UserRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.UUID;
 
 @Service
 public class SkinProfileService {
 
-    private final SkinProfileRepository skinProfileRepository;
-    private final UserService userService;
+    private final UserRepository userRepository;
 
-    public SkinProfileService(SkinProfileRepository skinProfileRepository, UserService userService) {
-        this.skinProfileRepository = skinProfileRepository;
-        this.userService = userService;
+    public SkinProfileService(UserRepository userRepository) {
+        this.userRepository = userRepository;
     }
 
-    @Transactional
     public SkinProfileResponse getProfileByEmail(String email) {
-        User user = userService.getUserByEmail(email);
-        SkinProfile profile = skinProfileRepository.findByUserId(user.getId())
-                .orElseGet(() -> {
-                    SkinProfile newProfile = new SkinProfile(user);
-                    return skinProfileRepository.save(newProfile);
-                });
-        return toResponse(profile);
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found: " + email));
+        ensureProfileExists(user);
+        return toResponse(user);
     }
 
-    @Transactional
-    public SkinProfileResponse getProfileByUserId(UUID userId) {
-        User user = userService.getUserById(userId);
-        SkinProfile profile = skinProfileRepository.findByUserId(userId)
-                .orElseGet(() -> {
-                    SkinProfile newProfile = new SkinProfile(user);
-                    return skinProfileRepository.save(newProfile);
-                });
-        return toResponse(profile);
+    public SkinProfileResponse getProfileByUserId(String userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+        ensureProfileExists(user);
+        return toResponse(user);
     }
 
-    @Transactional
     public SkinProfileResponse updateProfileByEmail(String email, SkinProfileRequest request) {
-        User user = userService.getUserByEmail(email);
-        SkinProfile profile = skinProfileRepository.findByUserId(user.getId())
-                .orElseGet(() -> new SkinProfile(user));
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found: " + email));
 
-        if (request.getSkinType() != null) {
-            profile.setSkinType(request.getSkinType());
-        }
-        if (request.getSensitivity() != null) {
-            profile.setSensitivity(request.getSensitivity());
-        }
-        if (request.getAllergies() != null) {
-            profile.setAllergies(request.getAllergies());
-        }
-        if (request.getGoals() != null) {
-            profile.setGoals(request.getGoals());
+        SkinProfile profile = user.getSkinProfile();
+        if (profile == null) {
+            profile = new SkinProfile();
+            user.setSkinProfile(profile);
         }
 
-        SkinProfile updatedProfile = skinProfileRepository.save(profile);
-        return toResponse(updatedProfile);
+        if (request.getSkinType() != null) profile.setSkinType(request.getSkinType());
+        if (request.getSensitivity() != null) profile.setSensitivity(request.getSensitivity());
+        if (request.getAllergies() != null) profile.setAllergies(request.getAllergies());
+        if (request.getGoals() != null) profile.setGoals(request.getGoals());
+
+        userRepository.save(user);
+        return toResponse(user);
     }
 
-    private SkinProfileResponse toResponse(SkinProfile profile) {
+    private void ensureProfileExists(User user) {
+        if (user.getSkinProfile() == null) {
+            user.setSkinProfile(new SkinProfile());
+            userRepository.save(user);
+        }
+    }
+
+    private SkinProfileResponse toResponse(User user) {
+        SkinProfile p = user.getSkinProfile();
         return new SkinProfileResponse(
-                profile.getId(),
-                profile.getUser().getId(),
-                profile.getSkinType(),
-                profile.getSensitivity(),
-                profile.getAllergies(),
-                profile.getGoals(),
-                profile.getUpdatedAt()
+                user.getId(),       // use userId as profile id
+                user.getId(),
+                p.getSkinType(),
+                p.getSensitivity(),
+                p.getAllergies(),
+                p.getGoals(),
+                p.getUpdatedAt()
         );
     }
 }

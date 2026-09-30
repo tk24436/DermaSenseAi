@@ -139,14 +139,6 @@ class ONNXAnalyzer(BaseAnalyzer):
         signals  = self._run_skin_signals(pil_img)
         acne_out = self._run_acne_detector(pil_img)
 
-        # Fallback to Face++ if local acne detector confidence is low across the board and Face++ credentials exist
-        if acne_out.get("max_confidence", 0.0) < 0.20 and os.getenv("FACEPP_API_KEY") and os.getenv("FACEPP_API_SECRET"):
-            try:
-                logger.info("Local ACNE04 detection confidence is low (<0.20). Attempting Face++ fallback...")
-                return FacePPAnalyzer().analyze(image_bytes)
-            except Exception as e:
-                logger.warning("Face++ fallback failed, proceeding with local analysis: %s", e)
-
         transformed = transform_acne04_response(acne_out, signals)
         return SkinAnalysisResponse(**transformed)
 
@@ -231,10 +223,38 @@ class ONNXAnalyzer(BaseAnalyzer):
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _parse_yolo_output(raw, orig_w: int, orig_h: int, conf_thresh: float = 0.25) -> list:
+    def _nms(boxes, scores, iou_threshold: float = 0.40):
+        import numpy as np
+        if len(boxes) == 0:
+            return []
+        x1 = boxes[:, 0]
+        y1 = boxes[:, 1]
+        x2 = boxes[:, 2]
+        y2 = boxes[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        order = scores.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            w = np.maximum(0.0, xx2 - xx1)
+            h = np.maximum(0.0, yy2 - yy1)
+            inter = w * h
+            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+            inds = np.where(ovr <= iou_threshold)[0]
+            order = order[inds + 1]
+        return keep
+
+    @classmethod
+    def _parse_yolo_output(cls, raw, orig_w: int, orig_h: int, conf_thresh: float = 0.12) -> list:
         """
         raw shape: [1, 5, 8400] or [1, 4+num_classes, 8400].
-        Returns list of {class, confidence, bbox} dicts above conf_thresh.
+        Applies confidence thresholding and Non-Maximum Suppression (NMS).
+        Returns list of {class, confidence, bbox} dicts.
         """
         import numpy as np
         predictions = raw[0].T  # [8400, channels]
@@ -248,18 +268,35 @@ class ONNXAnalyzer(BaseAnalyzer):
             class_indices = np.argmax(class_scores, axis=1)
             confidences = np.max(class_scores, axis=1)
 
+        mask = confidences >= conf_thresh
+        if not np.any(mask):
+            return []
+
+        filtered_boxes = boxes[mask]
+        filtered_confs = confidences[mask]
+        filtered_classes = class_indices[mask]
+
+        cx, cy, w, h = filtered_boxes[:, 0], filtered_boxes[:, 1], filtered_boxes[:, 2], filtered_boxes[:, 3]
+        x1 = cx - w / 2
+        y1 = cy - h / 2
+        x2 = cx + w / 2
+        y2 = cy + h / 2
+        b_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+
+        keep_indices = cls._nms(b_xyxy, filtered_confs, iou_threshold=0.40)
+
         detections = []
-        for (cx, cy, w, h), conf, cls_idx in zip(boxes, confidences, class_indices):
-            if conf < conf_thresh:
-                continue
-            x1 = int(max(0, (cx - w / 2) * orig_w / 640))
-            y1 = int(max(0, (cy - h / 2) * orig_h / 640))
-            x2 = int(min(orig_w, (cx + w / 2) * orig_w / 640))
-            y2 = int(min(orig_h, (cy + h / 2) * orig_h / 640))
+        for idx in keep_indices:
+            conf = float(filtered_confs[idx])
+            cls_idx = int(filtered_classes[idx])
+            bx1 = int(max(0, b_xyxy[idx, 0] * orig_w / 640))
+            by1 = int(max(0, b_xyxy[idx, 1] * orig_h / 640))
+            bx2 = int(min(orig_w, b_xyxy[idx, 2] * orig_w / 640))
+            by2 = int(min(orig_h, b_xyxy[idx, 3] * orig_h / 640))
             detections.append({
-                "class": int(cls_idx),
-                "confidence": float(conf),
-                "bbox": [x1, y1, x2, y2],
+                "class": cls_idx,
+                "confidence": round(conf, 3),
+                "bbox": [bx1, by1, bx2, by2],
             })
         return detections
 
@@ -272,7 +309,7 @@ def get_analyzer() -> BaseAnalyzer:
     strategy = os.getenv("ACTIVE_ANALYZER", "facepp").lower()
     if strategy == "onnx":
         return ONNXAnalyzer()
-    if strategy == "facepp":
+    if strategy in ("facepp", "faceapp"):
         return FacePPAnalyzer()
     raise ValueError(
         f"Unknown ACTIVE_ANALYZER '{strategy}'. Must be 'facepp' or 'onnx'."

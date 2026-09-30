@@ -7,33 +7,27 @@ import com.dermasense.auth.dto.UserSummaryDto;
 import com.dermasense.auth.entity.SkinProfile;
 import com.dermasense.auth.entity.User;
 import com.dermasense.auth.exception.EmailAlreadyExistsException;
-import com.dermasense.auth.repository.SkinProfileRepository;
 import com.dermasense.auth.repository.UserRepository;
 import com.dermasense.auth.security.JwtTokenProvider;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
 
     private final UserRepository userRepository;
-    private final SkinProfileRepository skinProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
 
     public AuthService(UserRepository userRepository,
-                       SkinProfileRepository skinProfileRepository,
                        PasswordEncoder passwordEncoder,
                        JwtTokenProvider jwtTokenProvider) {
         this.userRepository = userRepository;
-        this.skinProfileRepository = skinProfileRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
     }
 
-    @Transactional
     public AuthResponse register(RegisterRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase();
 
@@ -47,12 +41,10 @@ public class AuthService {
                 passwordEncoder.encode(request.getPassword())
         );
 
-        User savedUser = userRepository.save(user);
+        // Initialize empty skin profile embedded in user document
+        user.setSkinProfile(new SkinProfile());
 
-        // Initialize empty skin profile for new user
-        SkinProfile skinProfile = new SkinProfile(savedUser);
-        skinProfileRepository.save(skinProfile);
-        savedUser.setSkinProfile(skinProfile);
+        User savedUser = userRepository.save(user);
 
         String token = jwtTokenProvider.generateToken(savedUser);
         UserSummaryDto userSummary = new UserSummaryDto(
@@ -64,7 +56,6 @@ public class AuthService {
         return new AuthResponse(token, userSummary);
     }
 
-    @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase();
 

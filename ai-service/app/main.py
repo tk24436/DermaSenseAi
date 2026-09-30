@@ -7,16 +7,31 @@ FastAPI application entrypoint.
 import logging
 import os
 
+import base64
+import json
+import uuid
+
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from typing import Any, Dict, Optional
 
 from app.database import Base, engine, get_db
 from app.models import SkinAnalysis
 from app.schemas import SkinAnalysisResponse
 from app.services.analyzer import get_analyzer
 from app.services.storage import StorageService
+
+try:
+    from recommendation.routine_builder import generate_routine
+    from recommendation.llm_service import generate_explanation_and_insights
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from recommendation.routine_builder import generate_routine
+    from recommendation.llm_service import generate_explanation_and_insights
 
 load_dotenv()
 
@@ -30,8 +45,8 @@ logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="DermaSense AI - AI Analysis Service",
-    version="0.1.0",
+    title="DermaSense AI - AI Analysis & Recommendation Service",
+    version="0.2.0",
     docs_url="/docs",
 )
 
@@ -52,15 +67,58 @@ storage_service = StorageService()
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
+class RecommendRequest(BaseModel):
+    userId: Optional[str] = "user_default"
+    skinAnalysis: Optional[Dict[str, Any]] = None
+    skin_analysis: Optional[Dict[str, Any]] = None
+    skinProfile: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    skin_profile: Optional[Dict[str, Any]] = None
+
+    def get_analysis(self) -> Dict[str, Any]:
+        return self.skinAnalysis or self.skin_analysis or {}
+
+    def get_profile(self) -> Dict[str, Any]:
+        return self.skinProfile or self.skin_profile or {}
+
+
 @app.get("/health")
 async def health_check():
     """Simple liveness probe."""
     return {"status": "ok"}
 
 
+@app.post("/api/recommendations/generate")
+@app.post("/recommend")
+async def generate_recommendations(request: RecommendRequest):
+    """Generate personalized daily/weekly skincare routines based on AI vision analysis
+    and user skin profile (allergies, sensitivity, skin goals)."""
+    try:
+        analysis_data = request.get_analysis()
+        profile_data = request.get_profile()
+        routine = generate_routine(analysis_data, profile_data)
+        llm_response = generate_explanation_and_insights(
+            skin_analysis=analysis_data,
+            skin_profile=profile_data,
+            routine=routine,
+        )
+        insights = llm_response.get("insights", [])
+        return {
+            "routine": routine,
+            "explanation": llm_response.get("explanation", ""),
+            "insights": insights,
+            "aiInsights": " ".join(insights) if isinstance(insights, list) else str(insights),
+            "disclaimer": "*Disclaimer: This is not medical advice. Please consult a dermatologist for medical concerns.*",
+        }
+    except Exception as e:
+        logger.error("Recommendation generation failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/ai/analyze", response_model=SkinAnalysisResponse)
 async def analyze_image(
     file: UploadFile = File(...),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     """Accept a face image, run skin analysis, persist result, and return
@@ -104,15 +162,27 @@ async def analyze_image(
             detail=f"Image is too dark (average brightness {mean_brightness:.1f}/255). Please upload a well-lit photo.",
         )
 
-    # Haar Cascade face detector
+    # Face detection: Try frontal and profile cascades with skin texture fallback
     face_cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     face_cascade = cv2.CascadeClassifier(face_cascade_path)
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(60, 60))
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=2, minSize=(40, 40))
     if len(faces) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="No face detected in the image. Please upload a clear frontal face photo.",
-        )
+        profile_path = cv2.data.haarcascades + "haarcascade_profileface.xml"
+        if os.path.exists(profile_path):
+            profile_cascade = cv2.CascadeClassifier(profile_path)
+            faces = profile_cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=2, minSize=(40, 40))
+
+    if len(faces) == 0:
+        # Check if the image contains typical human skin tone pixels (YCbCr color space)
+        # to accept closeup acne skin crops while rejecting non-human or blank images
+        ycrcb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2YCrCb)
+        skin_mask = cv2.inRange(ycrcb, np.array([0, 133, 77]), np.array([255, 173, 127]))
+        skin_ratio = float(np.sum(skin_mask > 0)) / (height * width)
+        if skin_ratio < 0.08:
+            raise HTTPException(
+                status_code=400,
+                detail="No face detected in the image. Please upload a clear frontal face photo.",
+            )
 
     # --- Analysis ---
     try:
@@ -140,8 +210,22 @@ async def analyze_image(
 
     # --- Persist ---
     try:
+        resolved_user_id = x_user_id
+        if not resolved_user_id and authorization and authorization.startswith("Bearer "):
+            try:
+                token_parts = authorization.split(" ")[1].split(".")
+                if len(token_parts) >= 2:
+                    padding = "=" * (4 - (len(token_parts[1]) % 4))
+                    payload_bytes = base64.b64decode(token_parts[1] + padding)
+                    payload_data = json.loads(payload_bytes.decode())
+                    resolved_user_id = payload_data.get("sub") or payload_data.get("userId")
+            except Exception:
+                pass
+        if not resolved_user_id:
+            resolved_user_id = f"usr_{uuid.uuid4().hex[:12]}"
+
         db_record = SkinAnalysis(
-            userId="mock-user-id",  # TODO: extract from JWT once auth service is merged
+            userId=resolved_user_id,
             imageUrl=image_url,
             detectedIssues=[item.model_dump() for item in analysis_result.detectedIssues],
             poresDetected=[item.model_dump() for item in analysis_result.poresDetected],

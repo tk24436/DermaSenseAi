@@ -77,17 +77,32 @@ def transform_acne04_response(
     """
     detections: List[Dict[str, Any]] = acne_out.get("detections", [])
     max_conf: float = float(acne_out.get("max_confidence", 0.0))
+    count: int = len(detections)
 
-    # Determine acne presence and severity from ACNE04 detections
-    acne_present = len(detections) > 0 and max_conf > 0.25
-    if acne_present:
-        # Choose the detection with the highest confidence or highest severity
-        best_det = max(detections, key=lambda d: d.get("confidence", 0.0))
-        acne_severity = _map_acne_severity(best_det.get("class"), best_det.get("confidence", max_conf))
-        acne_conf = round(float(best_det.get("confidence", max_conf)), 2)
-    else:
+    # Determine acne presence, severity and calibrated confidence from detection count & max conf
+    if count == 0:
+        acne_present = False
         acne_severity = "none"
         acne_conf = round(max_conf, 2)
+        acne_subscore = 100
+    else:
+        acne_present = True
+        best_det = max(detections, key=lambda d: d.get("confidence", 0.0))
+        raw_cls = best_det.get("class")
+        cls_severity = _map_acne_severity(raw_cls, max_conf)
+
+        if cls_severity == "high" or count >= 10:
+            acne_severity = "high"
+            acne_conf = round(max(float(best_det.get("confidence", max_conf)), min(0.98, 0.80 + min(0.18, count * 0.005))), 2)
+            acne_subscore = max(10, min(42, int(42 - min(30, count * 0.8))))
+        elif cls_severity == "medium" or count >= 4:
+            acne_severity = "medium"
+            acne_conf = round(max(float(best_det.get("confidence", max_conf)), min(0.90, 0.60 + count * 0.03)), 2)
+            acne_subscore = max(45, min(69, int(70 - count * 2.5)))
+        else:
+            acne_severity = cls_severity if cls_severity != "none" else "low"
+            acne_conf = round(float(best_det.get("confidence", max_conf)), 2)
+            acne_subscore = max(70, min(88, int(92 - count * 5)))
 
     # If Glowlytics signals are provided, incorporate them; otherwise mark explicitly as not evaluated
     if signals:
@@ -181,7 +196,6 @@ def transform_acne04_response(
         else:
             skin_type = "combination"
 
-        acne_subscore = max(0, min(100, int(100 - acne_conf * 100))) if acne_present else 100
         subscores = {
             "acne": acne_subscore,
             "pigmentation": pigmentation_score,
@@ -242,8 +256,6 @@ def transform_acne04_response(
         skin_type = "neutral"
         acne_penalty = (30.0 if acne_severity == "high" else 20.0 if acne_severity == "medium" else 10.0) * acne_conf
         skin_score = max(0, min(100, int(round(100 - acne_penalty))))
-        acne_subscore = max(0, min(100, int(100 - acne_conf * 100))) if acne_present else 100
-
         subscores = {
             "acne": acne_subscore,
             "pigmentation": 100,

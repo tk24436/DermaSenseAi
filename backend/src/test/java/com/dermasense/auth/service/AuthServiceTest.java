@@ -3,10 +3,8 @@ package com.dermasense.auth.service;
 import com.dermasense.auth.dto.AuthResponse;
 import com.dermasense.auth.dto.LoginRequest;
 import com.dermasense.auth.dto.RegisterRequest;
-import com.dermasense.auth.entity.SkinProfile;
 import com.dermasense.auth.entity.User;
 import com.dermasense.auth.exception.EmailAlreadyExistsException;
-import com.dermasense.auth.repository.SkinProfileRepository;
 import com.dermasense.auth.repository.UserRepository;
 import com.dermasense.auth.security.JwtTokenProvider;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,7 +19,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
 import java.util.Optional;
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,21 +30,19 @@ class AuthServiceTest {
     @Mock
     private UserRepository userRepository;
 
-    @Mock
-    private SkinProfileRepository skinProfileRepository;
-
     private PasswordEncoder passwordEncoder;
     private JwtTokenProvider jwtTokenProvider;
     private AuthService authService;
 
     private User sampleUser;
-    private final UUID sampleId = UUID.randomUUID();
+    private final String sampleId = "507f1f77bcf86cd799439011"; // MongoDB ObjectId format
 
     @BeforeEach
     void setUp() {
         passwordEncoder = new BCryptPasswordEncoder();
-        jwtTokenProvider = new JwtTokenProvider("DermaSenseAiSuperSecretKeyThatIsAtLeast256BitsLongForSecureJwtAuth2026!", 86400000);
-        authService = new AuthService(userRepository, skinProfileRepository, passwordEncoder, jwtTokenProvider);
+        jwtTokenProvider = new JwtTokenProvider(
+                "DermaSenseAiSuperSecretKeyThatIsAtLeast256BitsLongForSecureJwtAuth2026!", 86400000);
+        authService = new AuthService(userRepository, passwordEncoder, jwtTokenProvider);
 
         sampleUser = new User("Shreya Sharma", "shreya@dermasense.ai", passwordEncoder.encode("password123"));
         sampleUser.setId(sampleId);
@@ -65,7 +60,6 @@ class AuthServiceTest {
             u.setId(sampleId);
             return u;
         });
-        when(skinProfileRepository.save(any(SkinProfile.class))).thenAnswer(inv -> inv.getArgument(0));
 
         AuthResponse response = authService.register(request);
 
@@ -80,7 +74,6 @@ class AuthServiceTest {
 
         verify(userRepository).existsByEmail("shreya@dermasense.ai");
         verify(userRepository).save(any(User.class));
-        verify(skinProfileRepository).save(any(SkinProfile.class));
     }
 
     @Test
@@ -96,7 +89,6 @@ class AuthServiceTest {
 
         assertTrue(ex.getMessage().contains("already exists"));
         verify(userRepository, never()).save(any(User.class));
-        verify(skinProfileRepository, never()).save(any(SkinProfile.class));
     }
 
     @Test
