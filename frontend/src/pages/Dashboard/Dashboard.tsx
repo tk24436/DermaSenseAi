@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getLatestAnalysisApi, getHistoricalProgressApi } from '../../api/client';
@@ -6,8 +6,6 @@ import { useAuth } from '../../context/AuthContext';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { ErrorAlert } from '../../components/common/ErrorAlert';
 import skincareModelHero from '../../assets/skincare_model_hero.jpg';
-import skincareScanProfile from '../../assets/skincare_scan_profile.jpg';
-import skincareProducts from '../../assets/skincare_products.jpg';
 import {
   Sparkles,
   Camera,
@@ -19,11 +17,140 @@ import {
   Wand2,
   ScanLine,
   CheckCircle,
-  Heart,
-  Plus,
   Quote,
   X,
+  Loader2,
+  Leaf,
+  Droplets,
+  Sun,
+  FlaskConical,
 } from 'lucide-react';
+
+// ─── Gemini product recommendation hook ───────────────────────────────────────
+// Keyed ONLY on skinType → stable across multiple scans of same skin type
+interface GeminiProduct {
+  name: string;
+  reason: string;
+  type: 'cleanser' | 'moisturiser' | 'sunscreen' | 'serum' | 'treatment' | 'other';
+}
+
+const GEMINI_CACHE_KEY = 'dermasense_gemini_products_v2';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+
+async function fetchGeminiProducts(skinType: string): Promise<GeminiProduct[]> {
+  if (!GEMINI_API_KEY) return [];
+
+  const prompt = `You are a dermatology product expert for India.
+Give a short list of exactly 5 real, commonly available skincare products in India suited for ${skinType} skin.
+For each product:
+- name: the real product name (brand + product)
+- reason: one short sentence (max 12 words) why it suits ${skinType} skin
+- type: one of: cleanser, moisturiser, sunscreen, serum, treatment
+
+Respond ONLY with a valid JSON array, no markdown, no extra text. Example:
+[{"name":"Cetaphil Gentle Skin Cleanser","reason":"Mild surfactants keep combination skin balanced.","type":"cleanser"}]`;
+
+  const res = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 512 },
+    }),
+  });
+
+  if (!res.ok) return [];
+  const json = await res.json();
+  const raw = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  // strip possible ```json fences
+  const clean = raw.replace(/```json|```/g, '').trim();
+  try {
+    const parsed = JSON.parse(clean);
+    if (Array.isArray(parsed)) return parsed.slice(0, 5) as GeminiProduct[];
+  } catch {}
+  return [];
+}
+
+function useGeminiProducts(skinType: string) {
+  const [products, setProducts] = useState<GeminiProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    // Check localStorage cache (keyed by skinType)
+    try {
+      const raw = localStorage.getItem(GEMINI_CACHE_KEY);
+      if (raw) {
+        const cache = JSON.parse(raw);
+        if (cache.skinType === skinType && Array.isArray(cache.products) && cache.products.length > 0) {
+          setProducts(cache.products);
+          return;
+        }
+      }
+    } catch {}
+
+    if (!GEMINI_API_KEY) {
+      // Graceful offline fallback — real Indian products per skin type
+      const fallbacks: Record<string, GeminiProduct[]> = {
+        oily: [
+          { name: 'Minimalist 2% Salicylic Acid Cleanser', reason: 'Unclogs pores and reduces excess sebum production.', type: 'cleanser' },
+          { name: 'Neutrogena Oil-Free Moisture', reason: 'Lightweight hydration without adding shine.', type: 'moisturiser' },
+          { name: 'Re\'equil Oxybenzone & OMC-free Sunscreen SPF 50', reason: 'Non-greasy broad-spectrum UV protection.', type: 'sunscreen' },
+          { name: 'Minimalist Niacinamide 10% + Zinc 1%', reason: 'Controls sebum, reduces pores and blemishes.', type: 'serum' },
+          { name: 'Dot & Key Waterlight Gel Moisturiser', reason: 'Ultra-light gel soothes oily T-zone flare.', type: 'moisturiser' },
+        ],
+        dry: [
+          { name: 'CeraVe Hydrating Cleanser', reason: 'Ceramides restore skin barrier without stripping moisture.', type: 'cleanser' },
+          { name: 'Cetaphil Moisturizing Cream', reason: 'Intense 24hr hydration for dry and sensitive skin.', type: 'moisturiser' },
+          { name: 'Lotus Safe Sun UV Screen SPF 50', reason: 'Moisturising sunscreen suited for dry Indian skin.', type: 'sunscreen' },
+          { name: 'The Ordinary Hyaluronic Acid 2% + B5', reason: 'Deep moisture retention for dry, flaky skin.', type: 'serum' },
+          { name: 'Plum Grape Seed & Sea Buckthorn Glow Restore Oil', reason: 'Nourishing facial oil for severely dry skin.', type: 'treatment' },
+        ],
+        combination: [
+          { name: 'Cetaphil Gentle Skin Cleanser', reason: 'Balances oily T-zone while preserving dry cheek areas.', type: 'cleanser' },
+          { name: 'Minimalist Polyglutamic Acid 2% Moisturiser', reason: 'Hydrates without greasiness for combination skin.', type: 'moisturiser' },
+          { name: 'Bioderma Photoderm MAX SPF 100', reason: 'High protection for Indian sun without whitecast.', type: 'sunscreen' },
+          { name: 'Minimalist Alpha Arbutin 2% + HA', reason: 'Evens skin tone across dry and oily zones.', type: 'serum' },
+          { name: 'Plum Green Tea Pore Cleansing Face Wash', reason: 'Controls shine on T-zone, gentle on dry cheeks.', type: 'cleanser' },
+        ],
+        neutral: [
+          { name: 'Simple Kind to Skin Moisturising Face Wash', reason: 'No harsh chemicals for balanced normal skin.', type: 'cleanser' },
+          { name: 'Pond\'s Bright Beauty SPF 30 Moisturiser', reason: 'Daily SPF + hydration in one step.', type: 'moisturiser' },
+          { name: 'Lakme Sun Expert SPF 50 PA+++ Tinted Sunscreen', reason: 'Lightweight Indian-market sunscreen with natural finish.', type: 'sunscreen' },
+          { name: 'Minimalist Vitamin C 10% Serum', reason: 'Brightens and antioxidant protection for healthy skin.', type: 'serum' },
+          { name: 'Kaya Skin Clinic Brightening Serum', reason: 'Clinically developed for Indian skin tone uniformity.', type: 'treatment' },
+        ],
+      };
+      const list = fallbacks[skinType] ?? fallbacks['combination'];
+      setProducts(list);
+      localStorage.setItem(GEMINI_CACHE_KEY, JSON.stringify({ skinType, products: list }));
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const list = await fetchGeminiProducts(skinType);
+      if (list.length > 0) {
+        setProducts(list);
+        localStorage.setItem(GEMINI_CACHE_KEY, JSON.stringify({ skinType, products: list }));
+      }
+    } catch {}
+    setLoading(false);
+  }, [skinType]);
+
+  useEffect(() => { load(); }, [load]);
+  return { products, loading };
+}
+
+// ─── Icon helper for product type ────────────────────────────────────────────
+const productTypeConfig = {
+  cleanser:    { label: 'Cleanser',    color: 'text-sky-600    bg-sky-50    dark:bg-sky-950/40    border-sky-200   dark:border-sky-800',    Icon: Droplets },
+  moisturiser: { label: 'Moisturiser', color: 'text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800', Icon: Leaf },
+  sunscreen:   { label: 'Sunscreen',   color: 'text-amber-700  bg-amber-50  dark:bg-amber-950/40  border-amber-200  dark:border-amber-800',  Icon: Sun },
+  serum:       { label: 'Serum',       color: 'text-violet-700 bg-violet-50 dark:bg-violet-950/40 border-violet-200 dark:border-violet-800', Icon: FlaskConical },
+  treatment:   { label: 'Treatment',   color: 'text-rose-700   bg-rose-50   dark:bg-rose-950/40   border-rose-200   dark:border-rose-800',   Icon: Wand2 },
+  other:       { label: 'Product',     color: 'text-[#3B5249]  bg-[#E8ECE9] dark:bg-[#252D28]     border-[#3B5249]/20',                        Icon: Sparkles },
+} as const;
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
@@ -47,14 +174,8 @@ export const Dashboard: React.FC = () => {
 
   // Routine category filter: 'all' | 'face' | 'body' | 'lip' | 'eye'
   const [routineCategory, setRoutineCategory] = useState<'all' | 'face' | 'body' | 'lip' | 'eye'>('all');
-  // Routine check items
-  const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>({
-    'step-0': true,
-    'step-1': true,
-    'step-2': true,
-  });
-  // Favorite state for recommendation card
-  const [isFavorite, setIsFavorite] = useState(false);
+  // Routine check items — all start unticked
+  const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>({});
   // Full analysis modal state
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   // How it works state for zero-state
@@ -67,7 +188,13 @@ export const Dashboard: React.FC = () => {
     }));
   };
 
-  const displayName = user?.name || 'Anne Miller';
+  // ⚠️ Must be called here — before any early returns — to satisfy React's Rules of Hooks.
+  // Uses skinType from data if available, empty string otherwise (hook safely no-ops until type is known).
+  const { products: geminiProducts, loading: geminiLoading } = useGeminiProducts(
+    data?.analysis?.skinType ?? ''
+  );
+
+  const displayName = user?.name || '';
 
   if (isLoading) {
     return (
@@ -184,68 +311,55 @@ export const Dashboard: React.FC = () => {
   const { analysis, recommendation } = data;
   const { skinScore, subscores, skinType, poresDetected } = analysis;
 
-  // Calculate score delta
+  // scoreDelta
   let scoreDelta = 5;
   if (history && history.length > 1) {
     scoreDelta = skinScore - history[0].skinScore;
   }
 
-  // Routine steps list
-  const defaultRoutineList = [
-    {
-      id: 'step-0',
-      title: 'Hydrating Gentle Cleanser',
-      badge: 'AM Step 1',
-      badgeColor: 'bg-amber-100 text-amber-800',
-      desc: 'Cleanse with lukewarm water for 60 seconds.',
-      time: '08:00 AM',
-      category: 'face',
-    },
-    {
-      id: 'step-1',
-      title: 'Hyaluronic Acid Serum',
-      badge: 'AM Step 2',
-      badgeColor: 'bg-amber-100 text-amber-800',
-      desc: 'Apply 3-4 drops on damp skin to boost moisture.',
-      time: '08:05 AM',
-      category: 'face',
-    },
-    {
-      id: 'step-2',
-      title: 'Daily Barrier Cream SPF 50+',
-      badge: 'AM Step 3',
-      badgeColor: 'bg-amber-100 text-amber-800',
-      desc: 'Broad spectrum protection against UV photo-damage.',
-      time: '08:10 AM',
-      category: 'face',
-    },
-    {
-      id: 'step-3',
-      title: 'Peptide Eye Contour Cream',
-      badge: 'PM Step 1',
-      badgeColor: 'bg-indigo-100 text-indigo-800',
-      desc: 'Gentle tap around orbital bone to reduce dark circles.',
-      time: '09:00 PM',
-      category: 'eye',
-    },
-    {
-      id: 'step-4',
-      title: 'Rich Ceramide Repair Night Mask',
-      badge: 'PM Step 2',
-      badgeColor: 'bg-indigo-100 text-indigo-800',
-      desc: 'Overnight barrier nourishment for dry cheek zones.',
-      time: '09:15 PM',
-      category: 'face',
-    },
-  ];
+  // Build routine list from real AI recommendation data — no mock steps
+  const parseStep = (raw: string | { step?: string; product?: string }) =>
+    typeof raw === 'string'
+      ? { step: raw.split(':')[0].trim(), product: raw.split(': ').slice(1).join(': ').trim() || raw.trim() }
+      : { step: (raw as any).step ?? '', product: (raw as any).product ?? String(raw) };
 
-  // Dynamic filter
+  const amSteps = (recommendation.routine?.morning ?? []).map((raw, i) => {
+    const { step, product } = parseStep(raw as any);
+    return {
+      id: `am-${i}`,
+      title: product || step,
+      badge: `AM Step ${i + 1}`,
+      badgeColor: 'bg-amber-100 text-amber-800',
+      desc: step && product ? `${step} — apply as part of your morning routine.` : 'Apply as part of your morning routine.',
+      time: `${8 + Math.floor(i * 0.083 * 60 / 60)}:${String((i * 5) % 60).padStart(2, '0')} AM`,
+      category: 'face' as const,
+    };
+  });
+
+  const pmSteps = (recommendation.routine?.night ?? []).map((raw, i) => {
+    const { step, product } = parseStep(raw as any);
+    return {
+      id: `pm-${i}`,
+      title: product || step,
+      badge: `PM Step ${i + 1}`,
+      badgeColor: 'bg-indigo-100 text-indigo-800',
+      desc: step && product ? `${step} — apply as part of your evening routine.` : 'Apply as part of your evening routine.',
+      time: `${9 + Math.floor(i * 0.25)}:${String((i * 15) % 60).padStart(2, '0')} PM`,
+      category: 'face' as const,
+    };
+  });
+
+  const defaultRoutineList = [...amSteps, ...pmSteps];
+
+  // Dynamic filter — all items are 'face' category from AI data
   const filteredSteps = defaultRoutineList.filter(
     (item) => routineCategory === 'all' || item.category === routineCategory
   );
 
   const completedCount = defaultRoutineList.filter((item) => completedSteps[item.id]).length;
-  const progressPercent = Math.round((completedCount / defaultRoutineList.length) * 100);
+  const progressPercent = defaultRoutineList.length > 0
+    ? Math.round((completedCount / defaultRoutineList.length) * 100)
+    : 0;
 
   return (
     <div className="tab-content space-y-8 animate-fade-in max-w-7xl mx-auto px-4 lg:px-12 py-6 lg:py-8">
@@ -356,120 +470,125 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* AI Mesh Scanner Visual Preview Card */}
+        {/* Skin Metrics Detail Card */}
         <div className="lg:col-span-7 bg-white dark:bg-[#1D221E] rounded-3xl p-6 border border-black/5 dark:border-white/5 shadow-soft flex flex-col justify-between">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <ScanLine className="w-5 h-5 text-[#3B5249] dark:text-emerald-400" />
               <h3 className="font-serif text-xl text-[#1A1D1A] dark:text-[#EFEFEA]">
-                AI Facial Diagnostics Overlay
+                Skin Condition Breakdown
               </h3>
             </div>
             <span className="text-xs px-3 py-1 rounded-full bg-[#E8ECE9] dark:bg-[#252D28] text-[#3B5249] dark:text-emerald-400 font-medium capitalize">
-              {skinType} Skin Profile
+              {skinType} Skin
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 items-center">
-            {/* AI Scan Portrait Overlay */}
-            <div className="sm:col-span-6 relative rounded-2xl overflow-hidden aspect-[4/3] sm:aspect-square bg-slate-100 dark:bg-slate-900 border border-black/5 shadow-inner group">
-              <img
-                src={skincareScanProfile}
-                alt="AI Scan Facial Target"
-                className="w-full h-full object-cover"
-              />
-
-              {/* AI Mesh Overlay Graphic */}
-              <div className="absolute inset-0 scannable-mesh opacity-60 pointer-events-none" />
-
-              {/* Sweeping Laser Scan Effect */}
-              <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent scan-line shadow-[0_0_15px_#34d399] pointer-events-none" />
-
-              {/* AI Bounding Spot Indicators */}
-              <div className="absolute top-[35%] left-[42%] w-4 h-4 border-2 border-emerald-400 rounded-full animate-ping pointer-events-none" />
-              <div className="absolute top-[35%] left-[42%] w-4 h-4 border border-emerald-300 rounded-full bg-emerald-400/20 pointer-events-none" />
-              <div className="absolute bottom-[30%] left-[55%] w-3 h-3 border border-amber-400 rounded-full bg-amber-400/20 pointer-events-none" />
-
-              {/* Floating Metric Tag */}
-              <div className="absolute bottom-3 left-3 bg-[#1A1D1A]/80 backdrop-blur-md text-white text-[11px] px-2.5 py-1 rounded-lg border border-white/10 flex items-center gap-1.5">
-                <CheckCircle className="w-3 h-3 text-emerald-400" />
-                <span>{poresDetected?.length || 3} Concern Zones</span>
+          {/* 2×2 Subscore metric grid */}
+          <div className="grid grid-cols-2 gap-4 mt-2">
+            {[
+              {
+                label: 'Acne Index',
+                value: subscores?.acne ?? 70,
+                display: subscores?.acne ?? 70,
+                barColor: 'bg-rose-400',
+                textColor: 'text-rose-500',
+                bgColor: 'bg-rose-50 dark:bg-rose-950/30',
+                status: (subscores?.acne ?? 70) > 70 ? 'Good' : (subscores?.acne ?? 70) > 40 ? 'Mild' : 'High',
+              },
+              {
+                label: 'Skin Texture',
+                value: subscores?.texture ?? 75,
+                display: subscores?.texture ?? 75,
+                barColor: 'bg-amber-400',
+                textColor: 'text-amber-600',
+                bgColor: 'bg-amber-50 dark:bg-amber-950/30',
+                status: (subscores?.texture ?? 75) > 70 ? 'Smooth' : (subscores?.texture ?? 75) > 40 ? 'Moderate' : 'Rough',
+              },
+              {
+                label: 'Moisture',
+                value: subscores?.oilBalance ?? 80,
+                display: subscores?.oilBalance ?? 80,
+                barColor: 'bg-emerald-500',
+                textColor: 'text-emerald-600',
+                bgColor: 'bg-emerald-50 dark:bg-emerald-950/30',
+                status: (subscores?.oilBalance ?? 80) > 70 ? 'Optimal' : (subscores?.oilBalance ?? 80) > 45 ? 'Fair' : 'Low',
+              },
+              {
+                label: 'Pigmentation',
+                value: subscores?.pigmentation ?? 78,
+                display: subscores?.pigmentation ?? 78,
+                barColor: 'bg-violet-500',
+                textColor: 'text-violet-600',
+                bgColor: 'bg-violet-50 dark:bg-violet-950/30',
+                status: (subscores?.pigmentation ?? 78) > 70 ? 'Even' : (subscores?.pigmentation ?? 78) > 45 ? 'Uneven' : 'Dark Spots',
+              },
+            ].map((metric) => (
+              <div
+                key={metric.label}
+                className={`${metric.bgColor} rounded-2xl p-4 border border-black/5 dark:border-white/5 space-y-3`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-[#1A1D1A] dark:text-[#EFEFEA]">{metric.label}</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/60 dark:bg-black/20 ${metric.textColor}`}>
+                    {metric.status}
+                  </span>
+                </div>
+                {/* Radial gauge */}
+                <div className="flex items-center gap-3">
+                  <div className="relative w-12 h-12 shrink-0">
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                      <path strokeWidth="4" stroke="currentColor" fill="none"
+                        className="text-black/8 dark:text-white/10"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                      <path
+                        strokeWidth="4" strokeLinecap="round" stroke="currentColor" fill="none"
+                        className={metric.textColor}
+                        strokeDasharray={`${metric.value}, 100`}
+                        style={{ transition: 'stroke-dasharray 1s ease-out' }}
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className={`text-[9px] font-bold ${metric.textColor}`}>{metric.display}%</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <div className="w-full h-1.5 bg-black/8 dark:bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${metric.barColor} rounded-full transition-all duration-1000`}
+                        style={{ width: `${metric.value}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-[#717771] dark:text-[#8E9991]">{metric.value}% scored</span>
+                  </div>
+                </div>
               </div>
+            ))}
+          </div>
+
+          {/* AI insight strip */}
+          <div className="mt-4 p-3.5 rounded-2xl bg-[#E8ECE9]/70 dark:bg-[#252D28] border border-[#3B5249]/20 flex items-start gap-3">
+            <div className="p-1.5 bg-[#3B5249] text-white rounded-xl mt-0.5 shrink-0">
+              <Wand2 className="w-3.5 h-3.5" />
             </div>
-
-            {/* Core Metrics Diagnostics Slider Bars */}
-            <div className="sm:col-span-6 space-y-4">
-              {/* Metric 1 */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-medium text-[#1A1D1A] dark:text-[#EFEFEA] flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-rose-400" /> Acne Risk Index
-                  </span>
-                  <span className="font-bold text-[#1A1D1A] dark:text-[#EFEFEA]">
-                    {100 - (subscores?.acne ?? 70)}%{' '}
-                    <span className="text-[10px] text-[#717771] font-normal">(Mild)</span>
-                  </span>
-                </div>
-                <div className="w-full h-2.5 bg-[#F7F7F4] dark:bg-[#181D19] rounded-full overflow-hidden p-0.5 border border-black/5 dark:border-white/10">
-                  <div
-                    className="h-full bg-rose-400 rounded-full transition-all duration-1000"
-                    style={{ width: `${100 - (subscores?.acne ?? 70)}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Metric 2 */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-medium text-[#1A1D1A] dark:text-[#EFEFEA] flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-amber-400" /> Dryness / Texture
-                  </span>
-                  <span className="font-bold text-[#1A1D1A] dark:text-[#EFEFEA]">
-                    {100 - (subscores?.texture ?? 75)}%{' '}
-                    <span className="text-[10px] text-amber-600 font-normal">(Elevated)</span>
-                  </span>
-                </div>
-                <div className="w-full h-2.5 bg-[#F7F7F4] dark:bg-[#181D19] rounded-full overflow-hidden p-0.5 border border-black/5 dark:border-white/10">
-                  <div
-                    className="h-full bg-amber-400 rounded-full transition-all duration-1000"
-                    style={{ width: `${100 - (subscores?.texture ?? 75)}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Metric 3 */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-medium text-[#1A1D1A] dark:text-[#EFEFEA] flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" /> Moisture Retention
-                  </span>
-                  <span className="font-bold text-[#1A1D1A] dark:text-[#EFEFEA]">
-                    {subscores?.texture ?? 80}%{' '}
-                    <span className="text-[10px] text-emerald-600 font-normal">(Optimal)</span>
-                  </span>
-                </div>
-                <div className="w-full h-2.5 bg-[#F7F7F4] dark:bg-[#181D19] rounded-full overflow-hidden p-0.5 border border-black/5 dark:border-white/10">
-                  <div
-                    className="h-full bg-emerald-500 rounded-full transition-all duration-1000"
-                    style={{ width: `${subscores?.texture ?? 80}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* AI Recommendation Banner */}
-              <div className="p-3 rounded-2xl bg-[#E8ECE9]/70 dark:bg-[#252D28] border border-[#3B5249]/20 flex items-start gap-3 mt-2">
-                <div className="p-1.5 bg-[#3B5249] text-white rounded-xl mt-0.5">
-                  <Wand2 className="w-3.5 h-3.5" />
-                </div>
-                <div>
-                  <h5 className="text-xs font-semibold text-[#1A1D1A] dark:text-[#EFEFEA]">AI Recommendation</h5>
-                  <p className="text-[11px] text-[#717771] dark:text-[#8E9991] leading-snug">
-                    Focus on Ceramide & Hyaluronic Serums to tackle lower cheek dryness.
-                  </p>
-                </div>
-              </div>
+            <div>
+              <h5 className="text-xs font-semibold text-[#1A1D1A] dark:text-[#EFEFEA]">AI Skin Insight</h5>
+              <p className="text-[11px] text-[#717771] dark:text-[#8E9991] leading-snug mt-0.5">
+                {recommendation.insights?.[0] || recommendation.explanation || 'Maintain your barrier with consistent hydration and SPF daily.'}
+              </p>
             </div>
           </div>
+
+          {/* Concern zones pill */}
+          {(poresDetected?.length ?? 0) > 0 && (
+            <div className="flex items-center gap-2 mt-3">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span className="text-xs text-[#717771] dark:text-[#8E9991]">
+                {poresDetected!.length} concern {poresDetected!.length === 1 ? 'zone' : 'zones'} detected · scan-verified
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -567,121 +686,83 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Column (5 cols): AI Product Recommendations Card */}
-        <div className="lg:col-span-5 flex flex-col justify-between space-y-6">
-          <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-6 lg:p-8 border border-black/5 dark:border-white/5 shadow-soft flex-1 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <span className="text-xs uppercase tracking-wider text-[#3B5249] dark:text-emerald-400 font-bold">
-                    Matched For Your Profile
-                  </span>
-                  <h3 className="font-serif text-2xl text-[#1A1D1A] dark:text-[#EFEFEA]">
-                    For You Recommendations
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setShowAnalysisModal(true)}
-                  className="text-xs text-[#3B5249] dark:text-emerald-400 font-semibold hover:underline cursor-pointer"
-                >
-                  See All
-                </button>
+        {/* Right Column (5 cols): Gemini AI Product Recommendations */}
+        <div className="lg:col-span-5">
+          <div className="bg-white dark:bg-[#1D221E] rounded-3xl p-6 lg:p-8 border border-black/5 dark:border-white/5 shadow-soft h-full flex flex-col">
+            {/* Header */}
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <span className="text-xs uppercase tracking-wider text-[#3B5249] dark:text-emerald-400 font-bold block">
+                  Matched For Your Profile
+                </span>
+                <h3 className="font-serif text-2xl text-[#1A1D1A] dark:text-[#EFEFEA] mt-0.5">
+                  Recommended Products
+                </h3>
+                <p className="text-[11px] text-[#717771] dark:text-[#8E9991] mt-1">
+                  Curated by Gemini AI for <span className="capitalize font-semibold text-[#3B5249] dark:text-emerald-400">{skinType}</span> skin in India
+                </p>
               </div>
-
-              {/* Featured Product Showcase Card */}
-              <div className="bg-[#F7F7F4] dark:bg-[#181D19] rounded-2xl p-5 border border-black/5 dark:border-white/10 relative overflow-hidden space-y-4">
-                <div className="absolute top-3 right-3">
-                  <button
-                    onClick={() => setIsFavorite(!isFavorite)}
-                    className="w-8 h-8 rounded-full bg-white dark:bg-[#1D221E] flex items-center justify-center text-gray-400 hover:text-rose-500 shadow-sm transition-colors cursor-pointer"
-                  >
-                    <Heart className={`w-4 h-4 ${isFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  {/* Product Visual */}
-                  <div className="w-28 h-28 rounded-xl bg-white dark:bg-black/30 p-2 flex items-center justify-center border border-black/5 dark:border-white/10 shrink-0 shadow-inner">
-                    <img
-                      src={skincareProducts}
-                      alt="Oriflame Love Nature Face Lotion"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#3B5249] dark:text-emerald-400">
-                      AI Top Match • 98%
-                    </span>
-                    <h4 className="font-serif text-lg font-normal leading-tight text-[#1A1D1A] dark:text-[#EFEFEA]">
-                      Oriflame Love Nature Face Lotion
-                    </h4>
-                    <p className="text-[11px] text-[#717771] dark:text-[#8E9991]">
-                      Organic Tea Tree & Lime formula for barrier balance.
-                    </p>
-
-                    <div className="flex items-baseline gap-2 pt-1">
-                      <span className="font-bold text-[#1A1D1A] dark:text-[#EFEFEA] text-base">$389</span>
-                      <span className="text-xs text-[#717771] line-through">$412</span>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded">
-                        Save $23
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 pt-2">
-                  <button
-                    onClick={() => alert('Product added to your cart!')}
-                    className="flex-1 py-2.5 rounded-xl btn-dark text-white text-xs font-semibold shadow-soft transition-all text-center cursor-pointer"
-                  >
-                    Buy Now
-                  </button>
-                  <button
-                    onClick={() => alert('Step added to your daily routine schedule!')}
-                    className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-[#1D221E] hover:bg-gray-50 border border-black/10 dark:border-white/10 text-[#1A1D1A] dark:text-[#EFEFEA] text-xs font-semibold shadow-sm cursor-pointer"
-                  >
-                    Add to Routine
-                  </button>
-                </div>
-              </div>
-
-              {/* Mini Recommendations Strip */}
-              <div className="mt-4 space-y-2">
-                <div className="p-3 rounded-xl bg-white dark:bg-[#181D19] border border-black/5 dark:border-white/10 flex items-center justify-between hover:border-[#3B5249]/40 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-[#F7F7F4] dark:bg-[#141714] p-1 border border-black/5 shrink-0 flex items-center justify-center">
-                      <Sparkles className="w-5 h-5 text-[#3B5249] dark:text-emerald-400" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-[#1A1D1A] dark:text-[#EFEFEA]">
-                        Ceramide Hydrating Barrier Lotion
-                      </h5>
-                      <span className="text-[10px] text-[#717771] dark:text-[#8E9991]">
-                        $24.00 • Moisture & Texture Support
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => alert('Added to routine!')}
-                    className="p-2 rounded-lg bg-[#F7F7F4] dark:bg-[#1D221E] text-[#1A1D1A] dark:text-[#EFEFEA] hover:bg-[#3B5249] hover:text-white transition-colors cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+              <div className="w-9 h-9 rounded-2xl bg-[#E8ECE9] dark:bg-[#252D28] flex items-center justify-center shrink-0">
+                <Sparkles className="w-4 h-4 text-[#3B5249] dark:text-emerald-400" />
               </div>
             </div>
 
-            {/* Skincare Philosophy Quote */}
-            <div className="mt-6 p-4 rounded-2xl bg-[#E8ECE9]/60 dark:bg-[#252D28] border border-[#3B5249]/10 flex items-center gap-3">
-              <Quote className="w-6 h-6 text-[#3B5249] dark:text-emerald-400 shrink-0" />
-              <p className="text-xs italic text-[#1A1D1A] dark:text-[#EFEFEA] font-serif">
-                "Consistency in barrier protection yields a 3x higher luminosity recovery rate."
+            {/* Product list */}
+            <div className="flex-1 space-y-3">
+              {geminiLoading && (
+                <div className="flex items-center gap-2 py-6 justify-center text-[#717771]">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-xs">Getting recommendations from Gemini…</span>
+                </div>
+              )}
+
+              {!geminiLoading && geminiProducts.map((product, idx) => {
+                const cfg = productTypeConfig[product.type] ?? productTypeConfig.other;
+                const { Icon } = cfg;
+                return (
+                  <div
+                    key={idx}
+                    className="group flex items-start gap-3.5 p-3.5 rounded-2xl bg-[#F7F7F4] dark:bg-[#181D19] border border-black/5 dark:border-white/5 hover:border-[#3B5249]/30 dark:hover:border-emerald-900/50 transition-all duration-200"
+                  >
+                    {/* Type icon */}
+                    <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 mt-0.5 ${cfg.color}`}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-sm font-semibold text-[#1A1D1A] dark:text-[#EFEFEA] leading-snug">
+                          {product.name}
+                        </h4>
+                        <span className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md border ${cfg.color}`}>
+                          {cfg.label}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#717771] dark:text-[#8E9991] mt-0.5 leading-snug">
+                        {product.reason}
+                      </p>
+                    </div>
+
+                    {/* Rank badge */}
+                    <span className="text-[10px] font-bold text-[#717771]/50 dark:text-white/20 shrink-0 mt-1">
+                      #{idx + 1}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer note */}
+            <div className="mt-5 pt-4 border-t border-black/5 dark:border-white/5 flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-[#3B5249] dark:text-emerald-400 shrink-0" />
+              <p className="text-[10px] text-[#717771] dark:text-[#8E9991] italic leading-snug">
+                Recommendations are stable per skin type and sourced for the Indian market.
               </p>
             </div>
           </div>
         </div>
       </div>
+
 
       {/* 4. Full Analysis Consultation Modal */}
       {showAnalysisModal && (
@@ -706,23 +787,24 @@ export const Dashboard: React.FC = () => {
               </p>
             </div>
 
-            {/* Visual Portrait & Overall Health Status */}
+            {/* Visual Portrait & Overall Health Status — SVG score ring instead of stock photo */}
             <div className="flex flex-col sm:flex-row items-center gap-6 p-5 rounded-2xl bg-[#F7F7F4] dark:bg-[#181D19] border border-black/5 dark:border-white/10">
-              <div className="relative w-28 h-36 rounded-2xl overflow-hidden shadow-soft shrink-0">
-                <img
-                  src={skincareScanProfile}
-                  alt="Skin profile scan"
-                  className="w-full h-full object-cover"
-                />
-                <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-medium backdrop-blur-xs">
-                  Dermal Scan
-                </span>
+              <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                  <path className="text-black/10 dark:text-white/10" strokeWidth="3" stroke="currentColor" fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                  <path className="text-emerald-500 transition-all duration-1000"
+                    strokeDasharray={`${skinScore}, 100`} strokeWidth="3" strokeLinecap="round"
+                    stroke="currentColor" fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="font-serif text-xl font-bold text-[#1A1D1A] dark:text-[#EFEFEA]">{skinScore}%</span>
+                  <span className="text-[9px] text-[#717771] font-medium">Score</span>
+                </div>
               </div>
 
               <div className="space-y-1.5 text-center sm:text-left">
-                <span className="font-serif text-4xl font-semibold text-[#1A1D1A] dark:text-[#EFEFEA]">
-                  {skinScore}%
-                </span>
                 <h4 className="text-sm font-bold text-[#1A1D1A] dark:text-[#EFEFEA]">
                   Skin Health Index
                 </h4>
