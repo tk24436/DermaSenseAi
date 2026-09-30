@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useNotifications, type NotificationType } from '../../context/NotificationContext';
+import skincareWellnessLogo from '../../assets/skincare_wellness.jpg';
 import {
   Leaf,
   LogOut,
@@ -83,8 +84,12 @@ export const Navbar: React.FC = () => {
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         {/* Brand Logo */}
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-10 h-10 rounded-2xl bg-[#3B5249] flex items-center justify-center text-white shadow-soft group-hover:scale-105 transition-transform duration-200">
-            <Leaf className="w-5 h-5 text-emerald-300" />
+          <div className="w-10 h-10 rounded-2xl overflow-hidden shadow-soft group-hover:scale-105 transition-transform duration-200 border border-emerald-600/20 flex-shrink-0 bg-[#3B5249]">
+            <img
+              src={skincareWellnessLogo}
+              alt="DermaSense AI"
+              className="w-full h-full object-cover"
+            />
           </div>
           <div>
             <span className="font-serif text-2xl tracking-tight block leading-none text-[#1A1D1A] dark:text-[#EFEFEA]">

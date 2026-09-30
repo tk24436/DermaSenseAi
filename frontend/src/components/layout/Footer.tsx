@@ -1,13 +1,13 @@
 import React from 'react';
-import { Leaf } from 'lucide-react';
+import skincareWellnessLogo from '../../assets/skincare_wellness.jpg';
 
 export const Footer: React.FC = () => {
   return (
     <footer className="mt-auto border-t border-black/5 dark:border-white/5 bg-[#F7F7F4]/80 dark:bg-[#141714] py-6 px-4 lg:px-12 text-center text-xs text-[#717771]">
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg bg-[#3B5249] flex items-center justify-center text-white shadow-xs">
-            <Leaf className="w-3.5 h-3.5 text-emerald-300" />
+          <div className="w-6 h-6 rounded-lg overflow-hidden flex items-center justify-center shadow-xs border border-emerald-600/20">
+            <img src={skincareWellnessLogo} alt="DermaSense AI" className="w-full h-full object-cover" />
           </div>
           <span className="font-serif text-sm font-normal text-[#1A1D1A] dark:text-white">
             DermaSense AI
