@@ -1,7 +1,11 @@
-# Helper script launched in the backend terminal window
-$JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
-$env:JAVA_HOME = $JAVA_HOME
-$env:PATH = $env:PATH + ";$JAVA_HOME\bin;C:\Tools\maven\bin"
+# Detect or set Java + Maven paths
+if (-not $env:JAVA_HOME -and (Test-Path "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot")) {
+    $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+    $env:PATH = "$env:PATH;$env:JAVA_HOME\bin"
+}
+if ((Get-Command mvn -ErrorAction SilentlyContinue) -eq $null -and (Test-Path "C:\Tools\maven\bin")) {
+    $env:PATH = "$env:PATH;C:\Tools\maven\bin"
+}
 
 $host.UI.RawUI.WindowTitle = "DermaSense -- Backend :8080"
 Write-Host "[ BACKEND ] Spring Boot starting..." -ForegroundColor Green
@@ -36,4 +40,10 @@ if (-not $mongoPortOpen) {
     }
 }
 
-& "C:\Tools\maven\bin\mvn.cmd" spring-boot:run
+if (Get-Command mvn -ErrorAction SilentlyContinue) {
+    mvn spring-boot:run
+} elseif (Test-Path "C:\Tools\maven\bin\mvn.cmd") {
+    & "C:\Tools\maven\bin\mvn.cmd" spring-boot:run
+} else {
+    Write-Host "Maven not found in PATH or C:\Tools\maven\bin. Please install Maven." -ForegroundColor Red
+}

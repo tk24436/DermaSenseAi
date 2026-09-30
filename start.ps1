@@ -5,11 +5,14 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# Hardcode Java + Maven paths (works before terminal restart)
-$JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
-$MAVEN_BIN = "C:\Tools\maven\bin\mvn.cmd"
-$env:JAVA_HOME = $JAVA_HOME
-$env:PATH = "$env:PATH;$JAVA_HOME\bin;C:\Tools\maven\bin"
+# Detect or set Java + Maven paths
+if (-not $env:JAVA_HOME -and (Test-Path "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot")) {
+    $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+    $env:PATH = "$env:PATH;$env:JAVA_HOME\bin"
+}
+if ((Get-Command mvn -ErrorAction SilentlyContinue) -eq $null -and (Test-Path "C:\Tools\maven\bin")) {
+    $env:PATH = "$env:PATH;C:\Tools\maven\bin"
+}
 
 Write-Host ""
 Write-Host "  ============================================" -ForegroundColor Cyan
