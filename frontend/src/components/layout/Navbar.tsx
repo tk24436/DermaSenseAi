@@ -5,7 +5,6 @@ import { useTheme } from '../../context/ThemeContext';
 import { useNotifications, type NotificationType } from '../../context/NotificationContext';
 import skincareWellnessLogo from '../../assets/skincare_wellness.jpg';
 import {
-  Leaf,
   LogOut,
   Sun,
   Moon,

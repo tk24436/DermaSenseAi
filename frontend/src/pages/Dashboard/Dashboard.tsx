@@ -17,7 +17,6 @@ import {
   Wand2,
   ScanLine,
   CheckCircle,
-  Quote,
   X,
   Loader2,
   Leaf,
